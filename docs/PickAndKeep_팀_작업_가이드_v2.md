@@ -1,7 +1,22 @@
-# Pick & Keep 팀 작업 가이드 (v2)
+# Pick & Keep 팀 작업 가이드 (v2.1, 11/22 업데이트)
 
 > 박철우(A: 인프라·저장 담당), 유채민(B: AI·분류·화면 담당)이 각자 무엇을 하고, 무엇을 함께 맞춰야 하는지 정리한 문서입니다.
 > 저장소에 `docs/` 폴더를 만들어 이 파일을 넣어두고 같이 보면 좋습니다.
+
+---
+
+## 0-1. 🆕 v2.1 변경 사항 (11/22, A·B 합의)
+
+| 구분 | 내용 | 영향 |
+|---|---|---|
+| SQS 방식 변경 | 분류 결과·진행 상태를 DB가 아니라 B의 `tmp/<batch_id>/<photo_id>.result.json`에 기록. **`update_classification`, `get_status`는 만들지 않음**. `status` 열은 남기되 항상 `done` | A: 워커 systemd 등록 + 실제 큐 생성만 |
+| 중복 방지 | `photos.file_hash` 열 + 중복 방지 인덱스, `is_duplicate()` 추가, `save_photo_record(..., file_hash=None)` 선택 인자. 해시는 **HEIC 변환 전 원본** SHA-256 | B: 저장 전에 `is_duplicate` 확인 |
+| 열람 기록 | `get_photo_url(key, mark_viewed=False)` 추가. 목록·썸네일은 `False`, 사진을 눌러 크게 볼 때만 기본값(`True`) | B: 크게 보기 화면 필요 |
+| HEIC 저장 | HEIC는 변환한 JPG(원래 해상도)를 S3에 업로드. `size`는 **원본 크기** | 없음 |
+| 임시 파일 | `tmp/<batch_id>/`에 두고 `result.json`으로 전달 (원본 이름, 경로, 원본 크기, 해시, 라벨, 그룹) | 없음 |
+| 보류함 함수 확정 | `delete_photo_record`, `move_photo` 이름 확정, 구현 완료 | - |
+
+> 변경 기록과 이유는 `docs/PickAndKeep_기능정리_발표노트.md` 2장(결정 기록)에도 남긴다.
 
 ---
 
@@ -23,17 +38,14 @@
 SQS 비동기 처리 도입이 확정되면서(11/17) A 쪽에 추가된 작업이다. 나머지 추가 기능(DetectText, 해시 캐시, 병렬 호출)은 B 파일 안에서만 처리하므로 A에게 영향이 없다.
 
 **지금 (1~2주차, DB 만들 때)**
-- [ ] `photos` 테이블에 `status` 열을 처음부터 포함
-  `status TEXT NOT NULL DEFAULT 'done'` (값: `pending` / `done` / `failed`)
-  → SQS를 끈 상태(`USE_SQS=false`)에서는 항상 `done`이라 기존 기능에 영향 없음
-- [ ] DB 연결 시 WAL 모드 켜기: `PRAGMA journal_mode=WAL;`
-  → Flask와 SQS 워커가 같은 DB 파일에 동시에 쓰기 때문에 필요
+- [x] `photos` 테이블에 `status` 열을 처음부터 포함 (v2.1: 항상 `done`, SQS는 사용 안 함)
+- [x] DB 연결 시 WAL 모드 켜기: `PRAGMA journal_mode=WAL;`
+  → gunicorn 여러 프로세스가 같은 DB 파일에 동시에 쓸 때 잠금 오류 감소
 
 **나중 (5~6주차)**
-- [ ] `db.py`에 함수 2개 추가 (4-2 참고)
-  - `update_classification(photo_id, labels, status)`: 분류 결과와 상태 저장
-  - `get_status(photo_ids)`: `{photo_id: status}` 반환
+- [x] ~~`db.py`에 `update_classification`, `get_status` 추가~~ → v2.1에서 취소 (B의 `result.json` 방식)
 - [ ] A 계정에 실제 SQS 큐(표준) 생성 → URL을 EC2의 `.env` `SQS_QUEUE_URL`에 입력
+  (EC2가 A 계정에 있어서 B 계정의 큐에는 접근할 수 없음)
 - [ ] `worker.py`용 systemd 서비스 등록 (Flask 서비스와 같은 방식, 재부팅 시 자동 실행)
 - [ ] gunicorn 실행 옵션에 `--timeout 120` 추가 (스위치를 끈 동기 방식에서 사진이 많을 때 502 방지)
 
@@ -137,8 +149,10 @@ B는 A가 만든 함수를 호출해 화면에 연결한다. **이름과 입력�
 def upload_photo(file_path: str, folder: str) -> str:
     """S3에 업로드하고 S3 키를 반환. folder: "keep" | "hold" """
 
-def get_photo_url(s3_key: str, expires: int = 3600) -> str:
-    """Presigned URL 반환. 호출 시 DB의 last_viewed도 갱신"""
+def get_photo_url(s3_key: str, expires: int = 3600, *,
+                  mark_viewed: bool = True) -> str:
+    """Presigned URL 반환. mark_viewed=True면 DB의 last_viewed도 갱신
+    🆕 v2.1: 목록·썸네일은 mark_viewed=False, 사진을 눌러 크게 볼 때만 기본값"""
 
 def delete_photo(s3_key: str) -> None:
     """S3 객체 삭제"""
@@ -149,8 +163,14 @@ def init_db() -> None:
     """테이블 생성"""
 
 def save_photo_record(filename: str, s3_key: str, folder: str,
-                      labels: list[dict], size: int) -> int:
-    """사진 정보 저장 후 id 반환"""
+                      labels: list[dict], size: int,
+                      file_hash: str | None = None) -> int:
+    """사진 정보 저장 후 id 반환
+    🆕 v2.1: file_hash(원본 SHA-256) 선택 인자. 같은 해시가 있으면 sqlite3.IntegrityError
+    filename=원본 이름, size=원본 크기"""
+
+def is_duplicate(file_hash: str) -> dict | None:
+    """🆕 v2.1: 같은 해시의 사진이 있으면 그 사진 정보, 없으면 None"""
 
 def get_photos(folder: str) -> list[dict]:
     """해당 보관함의 사진 목록"""
@@ -178,11 +198,11 @@ def analyze_images_parallel(images: list[bytes], max_workers: int = 5) -> list[l
     """여러 장을 병렬로 analyze_image 호출. 결과 순서는 입력 순서와 같음"""
 ```
 
-#### ⚠️ 추가로 합의가 필요한 함수
-보류함 알림에서 사용자가 고를 수 있는 선택지(삭제 / 60일 연장 / 평생 보관함으로 이동)를 처리하려면 아래 함수가 더 필요하다. A가 만들고 B가 화면에서 호출한다. 이름은 둘이 확인 후 확정.
+#### ✅ 보류함 함수 (v2.1 확정, 구현 완료)
+보류함 알림에서 사용자가 고를 수 있는 선택지(삭제 / 60일 연장 / 평생 보관함으로 이동)를 처리하는 함수. A가 만들고 B가 화면에서 호출한다.
 
 ```python
-# A 담당 (제안)
+# A 담당 (확정)
 def delete_photo_record(s3_key: str) -> None:
     """DB에서 사진 기록 삭제 (delete_photo와 함께 호출)"""
 
@@ -192,28 +212,21 @@ def move_photo(s3_key: str, to_folder: str) -> str:
 # '60일 연장'은 update_last_viewed(s3_key)로 처리 (열람 시각을 지금으로 갱신)
 ```
 
-#### 🆕 SQS 비동기 처리 (합의 완료)
-SQS는 **업로드 → 분류** 사이에만 들어간다. A의 S3 저장, Presigned URL, 라이프사이클, 60일 검사에는 영향이 없다. A에게 부탁할 것은 아래 세 가지뿐이다.
+#### 🆕 SQS 비동기 처리 (v2.1에서 방식 변경)
+SQS는 **업로드 → 분류** 사이에만 들어간다. A의 S3 저장, Presigned URL, 라이프사이클, 60일 검사에는 영향이 없다.
+분류 시점에는 아직 DB 기록(photo_id)이 없으므로, **분류 결과와 진행 상태는 DB가 아니라 B의 `tmp/<batch_id>/<photo_id>.result.json`에 기록**한다. 워커가 이 파일에 쓰고 `/status`는 이 파일을 읽는다.
 
 | 맞닿는 곳 | 왜 필요한지 | A가 할 것 |
 |---|---|---|
-| DB 테이블 | 분류가 끝났는지 화면이 확인해야 함 | `status` 열 추가, 함수 2개 |
 | EC2 실행 | 워커가 Flask와 별도로 계속 돌아야 함 | 워커용 systemd 서비스 파일 1개 (Flask와 같은 방식) |
-| SQLite 동시 쓰기 | Flask와 워커가 같은 DB 파일에 씀 | WAL 모드 켜기 (`PRAGMA journal_mode=WAL;` 한 줄) |
+| 실제 큐 | EC2가 A 계정에 있어 A 계정 큐만 접근 가능 | A 계정에 표준 큐 생성, URL을 EC2 `.env`에 입력 |
 
-```python
-# A 담당 (SQS용)
-def update_classification(photo_id: int, labels: list[dict], status: str) -> None:
-    """분류 결과와 상태 저장. status: "pending" | "done" | "failed" """
-
-def get_status(photo_ids: list[int]) -> dict:
-    """{photo_id: status} 반환. 처리 중 화면이 주기적으로 확인"""
-```
-
-- **B가 담당**: 큐 생성(테스트용), 메시지 보내기, 워커 코드(`worker.py`), 처리 중 화면
+- **B가 담당**: 큐 생성(테스트용), 메시지 보내기, 워커 코드(`worker.py`), `result.json` 기록, 처리 중 화면
+- **B → A 전달할 것**: 워커 실행 명령, 워커가 필요로 하는 `.env` 항목
+- **권장**: `result.json`은 임시 파일에 먼저 쓰고 `os.replace`로 바꿔치기 (`/status`가 쓰다 만 파일을 읽지 않게)
 - **안전장치**: `.env`의 `USE_SQS=false`면 기존 동기 방식 그대로 동작. 시연 직전 문제가 생겨도 바로 되돌릴 수 있음
 - **도입 시점**: 업로드 → 분류 → 저장 → 조회가 동기 방식으로 완성된 뒤 (5주차)
-- **DB 만들 때 `status` 열을 처음부터 넣어두기**. SQS를 끈 동기 방식에서는 `done`으로 채우면 되고, 나중에 테이블을 고칠 필요가 없음
+- `photos.status` 열은 남아 있지만 v2.1부터 사용하지 않음 (항상 `done`)
 
 ### 4-3. 데이터 규칙
 
@@ -228,10 +241,13 @@ CREATE TABLE IF NOT EXISTS photos (
     size         INTEGER NOT NULL,             -- 바이트
     uploaded_at  TEXT NOT NULL,                -- ISO 8601
     last_viewed  TEXT NOT NULL,                -- ISO 8601, 업로드 시 uploaded_at과 동일
-    status       TEXT NOT NULL DEFAULT 'done'  -- 🆕 'pending' | 'done' | 'failed' (SQS용, 동기 방식에서는 done)
-        CHECK (status IN ('pending', 'done', 'failed'))
+    status       TEXT NOT NULL DEFAULT 'done'  -- v2.1: 사용 안 함, 항상 done
+        CHECK (status IN ('pending', 'done', 'failed')),
+    file_hash    TEXT                          -- 🆕 v2.1: 원본 SHA-256, 중복 방지 (NULL 허용)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_file_hash ON photos (file_hash);
 ```
+- 시각은 전부 UTC ISO 8601 문자열 (예: `2026-11-22T09:00:00+00:00`)
 
 **S3 키 규칙**
 ```
@@ -247,14 +263,18 @@ hold/2026/11/<UUID>_<영문파일명>.jpg
 | `/upload` | POST | 사진 업로드, 변환 | - |
 | `/classify` | GET | 분류 결과 화면 (종류별 그룹) | - |
 | `/save` | POST | 선택한 사진을 keep/hold에 저장 | `upload_photo`, `save_photo_record` |
-| `/keep` | GET | 평생 보관함 조회 | `get_photos`, `get_photo_url` |
-| `/hold` | GET | 보류함 조회 | `get_photos`, `get_photo_url` |
+| `/keep` | GET | 평생 보관함 조회 | `get_photos`, `get_photo_url(key, mark_viewed=False)` |
+| `/hold` | GET | 보류함 조회 | `get_photos`, `get_photo_url(key, mark_viewed=False)` |
+| 🆕 `/photo/<id>` (이름은 B가 결정) | GET | 사진 크게 보기 = "열람" | `get_photo_url(key)` |
 | `/stats` | GET | 확보 용량 표시 | `get_saved_size` |
-| 🆕 `/status` | GET | 처리 중 화면이 분류 진행 상태 확인 (SQS) | `get_status` |
+| 🆕 `/status` | GET | 처리 중 화면이 분류 진행 상태 확인 (SQS) | - (B의 `result.json` 읽음) |
+
+#### ✅ 합의 완료 (v2.1)
+- **임시 파일 위치**: `tmp/<batch_id>/` (`.gitignore`에 포함됨). 저장 후 삭제는 B가 담당
+- **분류 결과 전달**: 사진마다 `result.json` (원본 이름, 파일 경로, 원본 크기, 해시, 라벨, 그룹)
+- **S3 업로드 파일**: HEIC는 변환한 JPG(원래 해상도, Rekognition용 축소본 아님)를 `upload_photo`에 넘김. `save_photo_record`의 `size`는 원본 크기
 
 #### ⚠️ 추가로 합의할 것
-- **임시 파일 위치**: 업로드·변환된 사진을 S3에 올리기 전 어디에 둘지 (제안: `tmp/` 폴더, `.gitignore`에 포함됨). 저장 후 삭제는 B가 담당
-- **`/upload` → `/classify` → `/save` 사이에 분류 결과를 어떻게 넘길지** (제안: `tmp/`에 JSON으로 저장하거나 Flask 세션 사용. B가 정하고 공유)
 - 🆕 **gunicorn 타임아웃**: 동기 방식에서 사진을 많이 올리면 gunicorn 기본 타임아웃(30초)을 넘겨 502 에러가 날 수 있음. A가 배포 설정할 때 `--timeout 120` 정도로 늘려두기 (SQS가 켜지면 이 문제 자체가 줄어들지만, 스위치를 끈 경우를 대비해 유지)
 
 ### 4-4. `.env` 설정 항목
@@ -402,7 +422,7 @@ git checkout -b feature/b-ui      # B
   - Learner Lab 세션이 꺼지면 cron이 안 돈다 → 시연은 스크립트 직접 실행, DB의 `last_viewed`를 과거 날짜로 바꿔서 시연
 - **배포 자동화**: gunicorn + nginx + systemd 설정, `deploy/` 폴더에 사용자 데이터 스크립트로 정리
   - 🆕 gunicorn `--timeout 120` 설정
-- 🆕 **SQS 지원:** `update_classification`, `get_status` 작성, 실제 큐 생성 후 URL을 `.env`에 입력, `worker.py`용 systemd 서비스 등록
+- 🆕 **SQS 지원 (v2.1):** 실제 큐 생성 후 URL을 `.env`에 입력, `worker.py`용 systemd 서비스 등록 (DB 함수는 필요 없음)
 
 ---
 
@@ -473,7 +493,7 @@ git checkout -b feature/b-ui      # B
 |---|---|---|---|
 | 1~2 | 버킷, `db.py`(🆕 `status` 열 포함), `aws_utils.py` 뼈대, EC2 세팅 | 이미지 변환, Rekognition, 스크린샷 판별(🆕 + DetectText), 첫 화면 | **업로드하면 라벨이 화면에 표시** / 추가 함수와 임시 파일 위치 합의 |
 | 3~4 | 저장, Presigned URL, 열람 기록, 용량 계산, 이동·삭제 함수 | 그룹화, 보관 위치 선택, 보관함 조회, 용량 화면, 🆕 해시 캐시, 병렬 처리 | **저장부터 조회까지 한 번에 연결** (내 컴퓨터 → EC2) |
-| 5~6 | 라이프사이클, 60일 검사 + SNS, 자동 배포, 🆕 SQS용 함수 2개·워커 서비스 | 화면 다듬기, 미열람 배너, 🆕 SQS 워커·처리 중 화면 | **통합 테스트, 시연 리허설, 최종 발표** |
+| 5~6 | 라이프사이클, 60일 검사 + SNS, 자동 배포, 🆕 실제 SQS 큐·워커 서비스 | 화면 다듬기, 미열람 배너, 🆕 SQS 워커·처리 중 화면 | **통합 테스트, 시연 리허설, 최종 발표** |
 
 **매주 한 번 짧게 맞춰보기 (권장)**
 - 이번 주에 한 것 / 막힌 것 / 다음 주 할 것
@@ -498,3 +518,5 @@ git checkout -b feature/b-ui      # B
 |---|---|
 | 11/12 | Learner Lab에서 SQS 큐 생성, CloudShell로 메시지 보내기·받기·큐 삭제 성공 |
 | 11/17 | SQS 비동기 처리 도입 합의 |
+| 11/22 | A: `db.py`, `aws_utils.py`, `test_a_infra.py` main 병합 (PR #1), S3 테스트 11단계 통과 |
+| 11/22 | v2.1 합의: SQS는 `result.json` 방식, 중복 방지, 열람 기록 옵션, HEIC→JPG 업로드 (0-1장) |
