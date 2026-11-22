@@ -74,6 +74,9 @@ def test_db() -> None:
 
     db.update_photo_location("hold/2026/11/aaa_test.jpg", "keep/2026/11/aaa_test.jpg", "keep")
     assert len(db.get_photos("keep")) == 3 and db.get_photos("hold") == []
+    moved = db.get_photo(pid)  # same id after a move, new key and folder
+    assert moved["s3_key"] == "keep/2026/11/aaa_test.jpg" and moved["folder"] == "keep"
+    assert moved["filename"] == "점심_피자.jpg" and db.get_photo(99999) is None
     db.delete_photo_record("keep/2026/11/aaa_test.jpg")
     assert len(db.get_photos("keep")) == 2
     try:
@@ -81,7 +84,7 @@ def test_db() -> None:
         raise AssertionError("invalid folder accepted")
     except ValueError:
         pass
-    ok("update_photo_location / delete_photo_record / folder check")
+    ok("update_photo_location / get_photo(id) after move / delete_photo_record / folder check")
 
 
 def _set_last_viewed(s3_key: str, last_viewed: str, notified_at: str | None = None) -> None:
