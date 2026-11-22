@@ -167,6 +167,17 @@ def get_photos(folder: str) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
+def get_photo(photo_id: int) -> dict | None:
+    """One photo by its id, or None if there is no such photo.
+
+    The id never changes, while s3_key changes when a photo is moved
+    (hold -> keep), so screens should pass the id around.
+    """
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
+    return _row_to_dict(row) if row else None
+
+
 def update_last_viewed(s3_key: str) -> None:
     """Set last_viewed to now. Also used for the '60-day extension' button."""
     with _connect() as conn:

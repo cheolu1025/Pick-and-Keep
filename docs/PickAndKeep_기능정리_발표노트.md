@@ -17,9 +17,9 @@
 | 열람 기록 (사진을 눌렀을 때만) | ✅ 코드·테스트 완료 | `aws_utils.py` | B의 "크게 보기" 화면 필요 |
 | 확보 용량 계산 | ✅ 코드·테스트 완료 | `db.py` | |
 | 보류 기간 지난 사진 찾기 (시연 모드 포함) | ✅ 코드·테스트 완료 | `db.py` | |
-| 자동 테스트 (DB 11 + S3 5 = 16단계) | ✅ DB 통과 (11/22) | `test_a_infra.py` | |
+| 자동 테스트 (DB 11 + S3 5 = 16단계) | ✅ 로컬·EC2 모두 통과 (11/22) | `test_a_infra.py` | |
 | EC2 서버 세팅 (코드 설치 + IAM 역할로 S3 테스트) | ✅ 완료 (11/22) | - | 웹 공개(gunicorn·nginx)는 아직 |
-| 보류함 알림 메일 (SNS + `check_hold.py` + cron) | 🔄 코드 완료, SNS 생성·서버 등록 대기 | `check_hold.py`, `deploy/crontab.txt` | |
+| 보류함 알림 메일 (SNS + `check_hold.py` + cron) | ✅ 완료 (11/22, PR #3) — 실제 메일 수신, cron 1분 실행 확인 | `check_hold.py`, `deploy/crontab.txt` | |
 | 라이프사이클 (keep 90일 → Glacier IR) | ⬜ 예정 | (AWS 콘솔) | |
 | 자동 실행 (gunicorn + nginx + systemd) | ⬜ 예정 | `deploy/` | |
 | SQS 워커 서비스 등록 | ⬜ 예정 | `deploy/` | 워커 코드는 B |
@@ -54,7 +54,8 @@
   - WAL 모드를 켜서 여러 프로세스가 동시에 써도 잠금 오류가 덜 나게 했다.
   - 잘못된 보관함 이름(keep/hold 외)은 DB 규칙(CHECK)과 코드 양쪽에서 막는다.
 - **발표용**: "서버 한 대 규모라 별도 DB 서버 없이 파일 하나로 동작하는 SQLite를 썼습니다."
-- 함수: `init_db`, `save_photo_record`, `get_photos`, `delete_photo_record`
+- 함수: `init_db`, `save_photo_record`, `get_photos`, `get_photo`(번호로 하나 찾기), `delete_photo_record`
+- **사진 번호(id)로 주고받기**: 사진을 평생 보관함으로 옮기면 S3 위치(`s3_key`)는 바뀌지만 번호는 그대로라, 화면끼리는 번호를 넘긴다. 번호로 찾으면 DB에 기록된 사진만 열 수 있다는 장점도 있다
 
 ### 1-5. 중복 사진 저장 방지
 - **무엇을**: 사진 원본(HEIC 변환 전)의 SHA-256 지문(해시)을 저장하고, 같은 지문이 이미 있으면 저장하지 않는다.
@@ -120,6 +121,7 @@
 | 11/22 | SQS 결과를 DB 대신 `tmp/<batch_id>/<photo_id>.result.json`에 기록. jobs 테이블·`update_classification`·`get_status` 만들지 않음. `status` 열은 남겨 두되 항상 `done` | 분류 시점엔 DB 기록(photo_id)이 없음, 구조 단순화. SQS는 B가 처리하고 A는 워커 systemd 등록만 | 합의 |
 | 11/22 | EC2: Ubuntu 24.04 LTS, t3.small, 20GiB gp3, 보안 그룹 `pick-and-keep-sg` (SSH 내 IP / HTTP 전체), `LabInstanceProfile` | 팀 가이드와 일치, 자료 많음 / 사진 변환 메모리 여유(2GiB) / B는 SSH 불필요(HTTP로 사용) | A 결정 |
 | 11/22 | 보류함 알림 시연은 **"시연 모드"**: 보류 기간을 `.env` 설정으로 두고 시연 때만 약 2분으로 줄임 + 1분마다 자동 검사(cron). 끝나면 60일로 복구 | SSH·노트북 교체 없이 B 노트북 하나로 시연, 시간 수동 조작 불필요 | 코드 구현 완료 (11/22), B 공유 예정 |
+| 11/22 | 크게 보기·보류함 버튼은 `s3_key` 대신 사진 번호(`id`)로 주고받음, `get_photo(id)` 추가 | 이동하면 `s3_key`가 바뀌어 주소가 깨짐 / DB에 있는 사진만 열리게 | A 결정, B 전달 |
 
 ---
 

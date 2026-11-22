@@ -17,6 +17,7 @@
 | 보류함 함수 확정 | `delete_photo_record`, `move_photo` 이름 확정, 구현 완료 | - |
 
 | 🆕 v2.2 시연 모드 | 보류 기간을 `.env`로 설정. `get_old_hold_photos()`를 인자 없이 부르면 설정을 따름, `hold_period_label()` 추가. 알림 메일은 사진당 한 번만 (`notified_at` 열) | B: 배너에서 인자 없이 호출, 문구에 `hold_period_label()` 사용 |
+| 🆕 v2.2 사진 번호로 찾기 | `get_photo(photo_id)` 추가. 크게 보기·보류함 버튼은 `s3_key` 대신 `id`를 주고받음 (이동해도 id는 그대로) | B: `/photo/<id>` 형태로 사용 |
 
 > 변경 기록과 이유는 `docs/PickAndKeep_기능정리_발표노트.md` 2장(결정 기록)에도 남긴다.
 
@@ -177,6 +178,10 @@ def is_duplicate(file_hash: str) -> dict | None:
 def get_photos(folder: str) -> list[dict]:
     """해당 보관함의 사진 목록"""
 
+def get_photo(photo_id: int) -> dict | None:
+    """🆕 v2.2: 사진 하나를 id로 찾기, 없으면 None
+    화면끼리는 s3_key 대신 id를 주고받음 (이동하면 s3_key는 바뀌지만 id는 그대로)"""
+
 def update_last_viewed(s3_key: str) -> None:
     """열람 시각 갱신"""
 
@@ -273,7 +278,7 @@ hold/2026/11/<UUID>_<영문파일명>.jpg
 | `/save` | POST | 선택한 사진을 keep/hold에 저장 | `upload_photo`, `save_photo_record` |
 | `/keep` | GET | 평생 보관함 조회 | `get_photos`, `get_photo_url(key, mark_viewed=False)` |
 | `/hold` | GET | 보류함 조회 | `get_photos`, `get_photo_url(key, mark_viewed=False)` |
-| 🆕 `/photo/<id>` (이름은 B가 결정) | GET | 사진 크게 보기 = "열람" | `get_photo_url(key)` |
+| 🆕 `/photo/<id>` (이름은 B가 결정) | GET | 사진 크게 보기 = "열람" | `get_photo(id)` → `get_photo_url(key)` |
 | `/stats` | GET | 확보 용량 표시 | `get_saved_size` |
 | 🆕 `/status` | GET | 처리 중 화면이 분류 진행 상태 확인 (SQS) | - (B의 `result.json` 읽음) |
 
