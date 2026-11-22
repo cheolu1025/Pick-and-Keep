@@ -7,6 +7,7 @@ All timestamps are UTC ISO 8601 strings, so periods can be compared as strings.
 import json
 import os
 import sqlite3
+import sys
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -15,10 +16,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 FOLDERS = ("keep", "hold")
+DEFAULT_HOLD_DAYS = 60
 
 # status: kept for compatibility, always 'done'. SQS progress is tracked by B
 # in tmp/<batch_id>/<photo_id>.result.json, not in this DB (agreed 2026-11-22).
-_SCHEMA = """
+# notified_at: when check_hold.py last emailed about this photo (NULL = never).
+_TABLE = """
 CREATE TABLE IF NOT EXISTS photos (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     filename     TEXT NOT NULL,
@@ -30,10 +33,14 @@ CREATE TABLE IF NOT EXISTS photos (
     last_viewed  TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'done'
         CHECK (status IN ('pending', 'done', 'failed')),
-    file_hash    TEXT
+    file_hash    TEXT,
+    notified_at  TEXT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_file_hash ON photos (file_hash);
 """
+_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_file_hash ON photos (file_hash);"
+
+# columns added after the first version; init_db() adds them to older DB files
+_ADDED_COLUMNS = {"file_hash": "TEXT", "notified_at": "TEXT"}
 
 
 # ---------- internal helpers ----------
@@ -73,12 +80,58 @@ def _check_folder(folder: str) -> None:
         raise ValueError(f"folder must be one of {FOLDERS}, got {folder!r}")
 
 
+def _positive_float(name: str) -> float | None:
+    """Read a positive number from the environment; None if empty or invalid."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0
+    if value <= 0:
+        print(f"[db] ignoring invalid {name}={raw!r}", file=sys.stderr)
+        return None
+    return value
+
+
+# ---------- hold period (normal 60 days / demo mode a few minutes) ----------
+
+def hold_period() -> timedelta:
+    """How long a hold photo may stay unviewed before it is reported.
+
+    .env HOLD_DEMO_MINUTES (demo mode) wins over HOLD_DAYS (default 60).
+    The Flask app reads .env at startup, so restart it after changing these.
+    """
+    minutes = _positive_float("HOLD_DEMO_MINUTES")
+    if minutes:
+        return timedelta(minutes=minutes)
+    return timedelta(days=_positive_float("HOLD_DAYS") or DEFAULT_HOLD_DAYS)
+
+
+def hold_period_label() -> str:
+    """Human-readable hold period for screens and emails, e.g. '60일' or '2분'."""
+    period = hold_period()
+    if period < timedelta(days=1):
+        return f"{period.total_seconds() / 60:g}분"
+    return f"{period.total_seconds() / 86400:g}일"
+
+
 # ---------- interface (agreed with B) ----------
 
 def init_db() -> None:
-    """Create the photos table and indexes if they do not exist."""
+    """Create the photos table and indexes if they do not exist.
+
+    Also adds columns introduced later to an existing DB file, so an old
+    photos.db keeps working without being deleted.
+    """
     with _connect() as conn:
-        conn.executescript(_SCHEMA)
+        conn.executescript(_TABLE)
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(photos)")}
+        for column, col_type in _ADDED_COLUMNS.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE photos ADD COLUMN {column} {col_type}")
+        conn.execute(_INDEX)
 
 
 def save_photo_record(filename: str, s3_key: str, folder: str,
@@ -128,9 +181,19 @@ def get_saved_size() -> int:
     return int(row[0])
 
 
-def get_old_hold_photos(days: int = 60) -> list[dict]:
-    """Hold photos whose last_viewed is older than `days` days."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+def _hold_cutoff(days: float | None) -> str:
+    period = hold_period() if days is None else timedelta(days=days)
+    return (datetime.now(timezone.utc) - period).isoformat(timespec="seconds")
+
+
+def get_old_hold_photos(days: float | None = None) -> list[dict]:
+    """Hold photos whose last_viewed is older than the hold period.
+
+    days=None (default) uses .env (HOLD_DAYS, or HOLD_DEMO_MINUTES in demo
+    mode), so the banner follows demo mode automatically. Passing a number
+    still works as before, e.g. get_old_hold_photos(60).
+    """
+    cutoff = _hold_cutoff(days)
     with _connect() as conn:
         rows = conn.execute(
             "SELECT * FROM photos WHERE folder = 'hold' AND last_viewed < ?"
@@ -166,3 +229,31 @@ def update_photo_location(old_s3_key: str, new_s3_key: str, new_folder: str) -> 
         )
         if cur.rowcount == 0:
             raise LookupError(f"no photo record for s3_key {old_s3_key!r}")
+
+
+# ---------- hold alert (used by check_hold.py) ----------
+
+def get_photos_to_notify() -> list[dict]:
+    """Old hold photos that have not been emailed about yet.
+
+    A photo is reported once. If the user extends it (update_last_viewed)
+    and it becomes old again, it is reported again (notified_at < last_viewed).
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM photos WHERE folder = 'hold' AND last_viewed < ?"
+            " AND (notified_at IS NULL OR notified_at < last_viewed)"
+            " ORDER BY last_viewed",
+            (_hold_cutoff(None),),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def mark_notified(s3_keys: list[str]) -> None:
+    """Record that an alert was sent for these photos."""
+    if not s3_keys:
+        return
+    placeholders = ",".join("?" * len(s3_keys))
+    with _connect() as conn:
+        conn.execute(f"UPDATE photos SET notified_at = ? WHERE s3_key IN ({placeholders})",
+                     [_now(), *s3_keys])

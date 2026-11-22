@@ -1,11 +1,11 @@
-# Pick & Keep 팀 작업 가이드 (v2.1, 11/22 업데이트)
+# Pick & Keep 팀 작업 가이드 (v2.2, 11/22 업데이트)
 
 > 박철우(A: 인프라·저장 담당), 유채민(B: AI·분류·화면 담당)이 각자 무엇을 하고, 무엇을 함께 맞춰야 하는지 정리한 문서입니다.
 > 저장소에 `docs/` 폴더를 만들어 이 파일을 넣어두고 같이 보면 좋습니다.
 
 ---
 
-## 0-1. 🆕 v2.1 변경 사항 (11/22, A·B 합의)
+## 0-1. 🆕 v2.1~v2.2 변경 사항 (11/22)
 
 | 구분 | 내용 | 영향 |
 |---|---|---|
@@ -15,6 +15,8 @@
 | HEIC 저장 | HEIC는 변환한 JPG(원래 해상도)를 S3에 업로드. `size`는 **원본 크기** | 없음 |
 | 임시 파일 | `tmp/<batch_id>/`에 두고 `result.json`으로 전달 (원본 이름, 경로, 원본 크기, 해시, 라벨, 그룹) | 없음 |
 | 보류함 함수 확정 | `delete_photo_record`, `move_photo` 이름 확정, 구현 완료 | - |
+
+| 🆕 v2.2 시연 모드 | 보류 기간을 `.env`로 설정. `get_old_hold_photos()`를 인자 없이 부르면 설정을 따름, `hold_period_label()` 추가. 알림 메일은 사진당 한 번만 (`notified_at` 열) | B: 배너에서 인자 없이 호출, 문구에 `hold_period_label()` 사용 |
 
 > 변경 기록과 이유는 `docs/PickAndKeep_기능정리_발표노트.md` 2장(결정 기록)에도 남긴다.
 
@@ -181,8 +183,13 @@ def update_last_viewed(s3_key: str) -> None:
 def get_saved_size() -> int:
     """저장된 사진 크기 합계(바이트) = 확보 가능 용량"""
 
-def get_old_hold_photos(days: int = 60) -> list[dict]:
-    """hold 폴더 중 last_viewed가 days일 이전인 사진"""
+def get_old_hold_photos(days: float | None = None) -> list[dict]:
+    """hold 폴더 중 보류 기간이 지난 사진
+    🆕 v2.2: 인자 없이 부르면 .env 설정(HOLD_DAYS, 시연 모드면 HOLD_DEMO_MINUTES)을 따름
+    숫자를 넘기면 예전처럼 동작 (예: get_old_hold_photos(60))"""
+
+def hold_period_label() -> str:
+    """🆕 v2.2: 화면·메일에 쓸 보류 기간 글자. 평소 '60일', 시연 모드 '2분'"""
 
 
 # ===== B 담당: rekognition_utils.py =====
@@ -243,7 +250,8 @@ CREATE TABLE IF NOT EXISTS photos (
     last_viewed  TEXT NOT NULL,                -- ISO 8601, 업로드 시 uploaded_at과 동일
     status       TEXT NOT NULL DEFAULT 'done'  -- v2.1: 사용 안 함, 항상 done
         CHECK (status IN ('pending', 'done', 'failed')),
-    file_hash    TEXT                          -- 🆕 v2.1: 원본 SHA-256, 중복 방지 (NULL 허용)
+    file_hash    TEXT,                         -- 🆕 v2.1: 원본 SHA-256, 중복 방지 (NULL 허용)
+    notified_at  TEXT                          -- 🆕 v2.2: 보류함 알림 메일 보낸 시각 (A 내부용)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_file_hash ON photos (file_hash);
 ```
@@ -286,7 +294,11 @@ SNS_TOPIC_ARN=       # A만 사용
 DB_PATH=photos.db
 USE_SQS=false        # 🆕 SQS 사용 여부 (SQS 완성 전까지 false)
 SQS_QUEUE_URL=       # 🆕 A: 실제 큐 / B: 본인 테스트 큐
+HOLD_DAYS=60         # 🆕 v2.2: 보류 기간(일). 없으면 60
+HOLD_DEMO_MINUTES=   # 🆕 v2.2: 시연 모드. 값(예: 2)이 있으면 보류 기간이 그 분(分)으로 바뀜. 평소엔 비워 둠
+SITE_URL=            # 🆕 v2.2: 알림 메일 속 링크 (비우면 EC2가 자기 현재 주소를 자동으로 넣음)
 ```
+- `.env`를 바꾸면 Flask를 재시작해야 반영됨 (서버에서는 A가 처리)
 
 ### 4-5. Git 협업 규칙
 - 각자 브랜치에서 작업 → push → GitHub에서 Pull Request로 `main`에 병합

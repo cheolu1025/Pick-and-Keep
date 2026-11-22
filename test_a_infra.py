@@ -14,7 +14,10 @@ import tempfile
 import urllib.request
 
 TEST_DB = "test_a_infra.db"
-os.environ["DB_PATH"] = TEST_DB  # set before importing db (dotenv will not override)
+# set before importing db (dotenv does not override existing values)
+os.environ["DB_PATH"] = TEST_DB
+os.environ["HOLD_DAYS"] = "60"
+os.environ["HOLD_DEMO_MINUTES"] = ""
 
 import db  # noqa: E402
 
@@ -79,6 +82,77 @@ def test_db() -> None:
     except ValueError:
         pass
     ok("update_photo_location / delete_photo_record / folder check")
+
+
+def _set_last_viewed(s3_key: str, last_viewed: str, notified_at: str | None = None) -> None:
+    with db._connect() as conn:
+        conn.execute("UPDATE photos SET last_viewed = ?, notified_at = ? WHERE s3_key = ?",
+                     (last_viewed, notified_at, s3_key))
+
+
+def test_hold_alert() -> None:
+    import sqlite3
+    from datetime import timedelta
+
+    import check_hold
+
+    # hold period: normal / demo mode / invalid value
+    assert db.hold_period() == timedelta(days=60) and db.hold_period_label() == "60일"
+    os.environ["HOLD_DEMO_MINUTES"] = "2"
+    assert db.hold_period() == timedelta(minutes=2) and db.hold_period_label() == "2분"
+    os.environ["HOLD_DEMO_MINUTES"] = "abc"
+    assert db.hold_period() == timedelta(days=60)
+    os.environ["HOLD_DEMO_MINUTES"] = ""
+    ok("hold_period / hold_period_label (60일, demo 2분, invalid -> 60일)")
+
+    key = "hold/2026/11/alert_test.jpg"
+    db.save_photo_record("보류_테스트.jpg", key, "hold", [], 2_500_000)
+    assert db.get_old_hold_photos() == [] and db.get_photos_to_notify() == []
+    os.environ["HOLD_DEMO_MINUTES"] = "2"
+    _set_last_viewed(key, db._hold_cutoff(0.01))  # ~14 minutes ago
+    assert len(db.get_old_hold_photos()) == 1  # banner follows demo mode
+    assert len(db.get_old_hold_photos(60)) == 0  # explicit days still works
+    os.environ["HOLD_DEMO_MINUTES"] = ""
+    ok("get_old_hold_photos() follows demo mode, explicit days unchanged")
+
+    _set_last_viewed(key, "2026-01-01T00:00:00+00:00")
+    assert len(db.get_photos_to_notify()) == 1
+    db.mark_notified([key])
+    assert db.get_photos_to_notify() == []  # reported only once
+    _set_last_viewed(key, "2026-01-03T00:00:00+00:00", notified_at="2026-01-02T00:00:00+00:00")
+    assert len(db.get_photos_to_notify()) == 1  # extended, then old again -> report again
+    db.mark_notified([])  # no-op
+    ok("get_photos_to_notify / mark_notified (no repeated email, re-alert after extension)")
+
+    photos = [{"filename": f"사진{i}.jpg", "size": 1_048_576, "last_viewed": "2026-01-01T00:00:00+00:00"}
+              for i in range(12)]
+    subject, body = check_hold.build_message(photos, "http://1.2.3.4")
+    assert subject.isascii() and len(subject) < 100 and "12 photo(s)" in subject
+    assert "사진0.jpg" in body and "외 2장" in body and "12.0 MB" in body and "http://1.2.3.4" in body
+    assert "2026-01-01 09:00" in body  # shown in KST
+    ok("check_hold.build_message (ASCII subject, Korean body, KST, max 10 listed)")
+
+    db.delete_photo_record(key)
+
+    # an old DB file without file_hash / notified_at gets the new columns
+    os.environ["DB_PATH"] = "test_a_infra_old.db"
+    try:
+        conn = sqlite3.connect("test_a_infra_old.db")
+        conn.execute("CREATE TABLE photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL,"
+                     " s3_key TEXT NOT NULL UNIQUE, folder TEXT NOT NULL, labels TEXT, size INTEGER NOT NULL,"
+                     " uploaded_at TEXT NOT NULL, last_viewed TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'done')")
+        conn.commit()
+        conn.close()
+        db.init_db()
+        with db._connect() as c:
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(photos)")}
+        assert {"file_hash", "notified_at"} <= cols
+    finally:
+        os.environ["DB_PATH"] = TEST_DB
+        for suffix in ("", "-wal", "-shm"):
+            if os.path.exists("test_a_infra_old.db" + suffix):
+                os.remove("test_a_infra_old.db" + suffix)
+    ok("init_db adds new columns to an old DB file")
 
 
 def test_aws() -> None:
@@ -146,6 +220,7 @@ def main() -> None:
     remove_test_db()
     try:
         test_db()
+        test_hold_alert()
         if db_only:
             print("\nDB tests passed (S3 skipped: --db-only)")
         else:
