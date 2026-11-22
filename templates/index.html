@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <h1>남길 사진만 골라서 보관해요</h1>
+  <p>사진을 올리면 AI가 종류별로 묶어 드려요. 어디에 보관할지는 직접 고르면 돼요.</p>
+</section>
+
+<form class="upload" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" id="upload-form">
+  <label class="dropzone" for="photos">
+    <strong>사진 선택</strong>
+    <span>JPG, PNG, HEIC · 여러 장 가능</span>
+    <span class="count" id="count"></span>
+  </label>
+  <input type="file" id="photos" name="photos" multiple
+         accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic">
+  <button type="submit" id="submit">분류 시작</button>
+</form>
+
+<script>
+  const input = document.getElementById('photos');
+  const count = document.getElementById('count');
+  input.addEventListener('change', () => {
+    count.textContent = input.files.length ? `${input.files.length}장 선택됨` : '';
+  });
+  document.getElementById('upload-form').addEventListener('submit', () => {
+    const btn = document.getElementById('submit');
+    btn.disabled = true;
+    btn.textContent = '분류 중... 잠시만 기다려 주세요';
+  });
+</script>
+{% endblock %}
