@@ -14,18 +14,93 @@
   <input type="file" id="photos" name="photos" multiple
          accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic">
   <button type="submit" id="submit">분류 시작</button>
+
+  <!-- 진행률: 분류를 시작하면 버튼 대신 보인다 -->
+  <div class="progress" id="progress" hidden>
+    <div class="progress-head">
+      <strong id="progress-text">분류 준비 중</strong>
+      <span class="progress-pct" id="progress-pct">0%</span>
+    </div>
+    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-track">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+    <p class="progress-file" id="progress-file"></p>
+  </div>
 </form>
 
 <script>
+(() => {
+  const ALLOWED = ['.jpg', '.jpeg', '.png', '.heic', '.heif'];
+  const form = document.getElementById('upload-form');
   const input = document.getElementById('photos');
   const count = document.getElementById('count');
+  const btn = document.getElementById('submit');
+  const box = document.getElementById('progress');
+  const bar = document.getElementById('progress-bar');
+  const track = document.getElementById('progress-track');
+  const text = document.getElementById('progress-text');
+  const pctEl = document.getElementById('progress-pct');
+  const fileEl = document.getElementById('progress-file');
+
   input.addEventListener('change', () => {
     count.textContent = input.files.length ? `${input.files.length}장 선택됨` : '';
   });
-  document.getElementById('upload-form').addEventListener('submit', () => {
-    const btn = document.getElementById('submit');
-    btn.disabled = true;
-    btn.textContent = '분류 중... 잠시만 기다려 주세요';
+
+  // 진행률에 따라 빨강(0~32%) → 주황(33~65%) → 초록(66~100%)
+  function setProgress(done, total, name) {
+    const pct = total ? Math.round(done / total * 100) : 0;
+    bar.style.width = Math.max(pct, 3) + '%';   // 0%일 때도 빨간색이 살짝 보이게
+    bar.dataset.stage = pct < 33 ? 'red' : pct < 66 ? 'orange' : 'green';
+    track.setAttribute('aria-valuenow', pct);
+    pctEl.textContent = pct + '%';
+    text.textContent = done < total ? `분류 중 ${done} / ${total}장` : `${total}장 분류 완료!`;
+    fileEl.textContent = name ? `지금: ${name}` : '';
+  }
+
+  form.addEventListener('submit', async (e) => {
+    const files = Array.from(input.files);
+    if (!files.length) return;          // 선택 안 했으면 서버가 안내 (예비 경로)
+    e.preventDefault();
+
+    const ok = files.filter(f => ALLOWED.some(ext => f.name.toLowerCase().endsWith(ext)));
+    const skipped = files.filter(f => !ok.includes(f)).map(f => f.name);
+
+    btn.hidden = true;
+    box.hidden = false;
+    input.disabled = true;
+    setProgress(0, ok.length, ok[0] && ok[0].name);
+
+    try {
+      const { batch_id } = await (await fetch('/batch', { method: 'POST' })).json();
+      const photoIds = [];
+
+      for (let i = 0; i < ok.length; i++) {
+        setProgress(i, ok.length, ok[i].name);
+        const data = new FormData();
+        data.append('photo', ok[i]);
+        const res = await fetch(`/batch/${batch_id}/photo`, { method: 'POST', body: data });
+        if (res.ok) {
+          photoIds.push((await res.json()).photo_id);
+        } else {
+          skipped.push(ok[i].name);     // 이 사진만 건너뛰고 계속
+        }
+      }
+      setProgress(ok.length, ok.length, '');
+
+      const fin = await fetch(`/batch/${batch_id}/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photo_ids: photoIds, skipped }),
+      });
+      window.location = (await fin.json()).redirect;
+    } catch (err) {
+      text.textContent = '연결이 끊겼어요. 서버가 켜져 있는지 확인하고 다시 시도해 주세요.';
+      bar.dataset.stage = 'red';
+      input.disabled = false;
+      btn.hidden = false;
+      console.error(err);
+    }
   });
+})();
 </script>
 {% endblock %}

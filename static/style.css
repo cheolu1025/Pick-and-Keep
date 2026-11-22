@@ -8,8 +8,10 @@
   --muted: #6b7c85;
   --line: #dde5e8;
   --red: #d9534f;
+  --green: #3a9d5d;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }  /* 다른 display 설정보다 '숨김'이 우선 */
 body {
   margin: 0;
   background: var(--bg);
@@ -44,6 +46,21 @@ button, .button-secondary {
 }
 button:disabled { opacity: .6; cursor: wait; }
 .button-secondary { background: var(--card); color: var(--navy); border: 1px solid var(--line); margin-top: 24px; }
+
+/* 분류 진행률 */
+.progress { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.progress-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.progress-head strong { color: var(--navy); }
+.progress-pct { font-weight: 800; font-size: 1.25rem; font-variant-numeric: tabular-nums; color: var(--navy); }
+.progress-track { height: 14px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.progress-bar {
+  height: 100%; width: 0; border-radius: 999px;
+  background: var(--red);
+  transition: width .4s ease, background-color .6s ease;
+}
+.progress-bar[data-stage="orange"] { background: var(--orange); }
+.progress-bar[data-stage="green"] { background: var(--green); }
+.progress-file { margin: 10px 0 0; font-size: .85rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .card { background: var(--card); border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
