@@ -233,3 +233,9 @@ tmp/
 venv/
 __pycache__/
 .DS_Store
+.vscode/
+CLAUDE.md
+
+# SQLite WAL side files
+*.db-wal
+*.db-shm
