@@ -1,32 +1,63 @@
 {% extends "base.html" %}
+{% block body_class %}home{% endblock %}
+{% block flashes %}{% endblock %}
 {% block content %}
 <section class="hero">
-  <h1>남길 사진만 골라서 보관해요</h1>
-  <p>사진을 올리면 AI가 종류별로 묶어 드려요. 어디에 보관할지는 직접 고르면 돼요.</p>
-</section>
+  <div class="panel">
+    <div class="panel-top"><span>Pick &amp; Keep</span><span>평생 보관함 · 보류함</span></div>
 
-<form class="upload" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" id="upload-form">
-  <label class="dropzone" for="photos">
-    <strong>사진 선택</strong>
-    <span>JPG, PNG, HEIC · 여러 장 가능</span>
-    <span class="count" id="count"></span>
-  </label>
-  <input type="file" id="photos" name="photos" multiple
-         accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic">
-  <button type="submit" id="submit">분류 시작</button>
+    <div class="panel-center">
+      <h1 class="logo">Pick<i>&amp;</i>Keep</h1>
+      <p class="tagline">찍어 둔 사진은 많아도<br>오래 남길 사진은 몇 장이에요</p>
 
-  <!-- 진행률: 분류를 시작하면 버튼 대신 보인다 -->
-  <div class="progress" id="progress" hidden>
-    <div class="progress-head">
-      <strong id="progress-text">분류 준비 중</strong>
-      <span class="progress-pct" id="progress-pct">0%</span>
+      {% with messages = get_flashed_messages() %}
+        {% for m in messages %}<p class="flash">{{ m }}</p>{% endfor %}
+      {% endwith %}
+
+      <form class="upload" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" id="upload-form">
+        <input type="file" id="photos" name="photos" multiple
+               accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic">
+        <div class="actions" id="actions">
+          <label class="btn btn-dark" for="photos" tabindex="0" id="pick">사진 고르기</label>
+          <noscript><button type="submit" class="btn">분류 시작</button></noscript>
+        </div>
+        <span class="count" id="count"></span>
+        <span class="hint">JPG, PNG, HEIC · 여러 장 한 번에 · 고르면 바로 분류해요</span>
+
+        <!-- 진행률: 분류를 시작하면 버튼 대신 보인다 -->
+        <div class="progress" id="progress" hidden>
+          <div class="progress-head">
+            <strong id="progress-text">분류 준비 중</strong>
+            <span class="progress-pct" id="progress-pct">0%</span>
+          </div>
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-track">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <p class="progress-file" id="progress-file"></p>
+        </div>
+      </form>
     </div>
-    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-track">
-      <div class="progress-bar" id="progress-bar"></div>
-    </div>
-    <p class="progress-file" id="progress-file"></p>
+
+    <div class="panel-bottom"><span>AI가 묶고, 내가 고르는 사진 백업</span><span>2026 클라우드컴퓨팅</span></div>
   </div>
-</form>
+
+  {# 오른쪽: 최근 평생 보관한 사진. 아직 없으면 빈 필름 #}
+  {% if film %}
+  <div class="film" aria-label="최근 평생 보관한 사진">
+    {% set slots = film + [none] * (6 - film|length) %}  {# 6칸보다 적으면 빈 필름 칸으로 채움 #}
+    {% for col in [slots[0::2], slots[1::2]] %}
+    <div class="col">{% for p in col %}{% if p %}<img src="{{ p.url }}" alt="{{ p.name }}" loading="lazy">{% else %}<div class="slot" aria-hidden="true"></div>{% endif %}{% endfor %}</div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="film empty">
+    <div class="film-empty">
+      <div class="frames"><span></span><span></span><span></span></div>
+      평생 보관한 사진이<br>여기에 쌓여요
+    </div>
+  </div>
+  {% endif %}
+</section>
 
 <script>
 (() => {
@@ -34,7 +65,7 @@
   const form = document.getElementById('upload-form');
   const input = document.getElementById('photos');
   const count = document.getElementById('count');
-  const btn = document.getElementById('submit');
+  const btn = document.getElementById('actions');  // 사진 고르기 버튼
   const box = document.getElementById('progress');
   const bar = document.getElementById('progress-bar');
   const track = document.getElementById('progress-track');
@@ -47,6 +78,13 @@
     count.classList.remove('count-warn');
     // 사진을 골랐으면 위에 남아 있던 안내 메시지("사진을 선택해 주세요" 등)는 지운다
     if (input.files.length) document.querySelectorAll('.flash').forEach(el => el.remove());
+    // 버튼 하나로: 사진을 고르면 바로 분류 시작 (창을 그냥 닫으면 아무 일도 안 함)
+    if (input.files.length) form.requestSubmit();
+  });
+
+  // 키보드로도 "사진 고르기"를 누를 수 있게 (label은 Enter로 안 열림)
+  document.getElementById('pick').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
   });
 
   // 진행률에 따라 빨강(0~32%) → 주황(33~65%) → 초록(66~100%)

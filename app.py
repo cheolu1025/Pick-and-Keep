@@ -19,15 +19,18 @@ from dotenv import load_dotenv
 load_dotenv()  # .env를 먼저 읽어야 아래 모듈들이 설정값을 가져감
 
 from flask import (Flask, abort, flash, jsonify, redirect, render_template,
-                   request, send_from_directory, url_for)
+                   request, send_from_directory, session, url_for)
 
 import classify
+import db
 import image_utils
 import storage
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-me")
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 요청 하나당 최대 200MB
+
+db.init_db()  # A: photos 테이블이 없으면 만든다 (여러 번 불러도 괜찮음)
 
 
 def _batch_path(batch_id: str) -> str:
@@ -75,7 +78,37 @@ def _save_results(batch_path: str, results: list) -> None:
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", film=_film_photos(6))
+
+
+SAMPLE_DIR = os.path.join(app.static_folder, "sample")
+
+
+def _sample_sets() -> list[list[str]]:
+    """기본 사진 묶음 목록. static/sample/ 아래 폴더 하나가 한 묶음 (예: sample/city, sample/warm)"""
+    if not os.path.isdir(SAMPLE_DIR):
+        return []
+    sets = []
+    for d in sorted(os.listdir(SAMPLE_DIR)):
+        folder = os.path.join(SAMPLE_DIR, d)
+        if os.path.isdir(folder):
+            files = sorted(f for f in os.listdir(folder) if image_utils.is_allowed(f))
+            if files:
+                sets.append([f"sample/{d}/{f}" for f in files])
+    return sets
+
+
+def _film_photos(n: int) -> list[dict]:
+    """첫 화면 오른쪽 사진 n장: 최근 평생 보관한 사진을 먼저, 모자라면 기본 사진으로 채움.
+    기본 사진 묶음이 여러 개면 첫 화면을 열 때마다 번갈아 보여준다 (session에 순번 저장)"""
+    photos = storage.recent_keep_photos(n)
+    sets = _sample_sets()
+    if len(photos) < n and sets:
+        turn = session.get("film_set", -1) + 1
+        session["film_set"] = turn
+        for path in sets[turn % len(sets)][:n - len(photos)]:
+            photos.append({"url": url_for("static", filename=path), "name": "기본 사진"})
+    return photos
 
 
 # ---------- 한 장씩 업로드 (진행률 표시용) ----------
@@ -229,6 +262,14 @@ def saved_view(batch_id):
 def tmp_image(batch_id, filename):
     """분류 결과 화면에 썸네일을 보여주기 위한 경로 (S3 저장 전 임시 사진)"""
     return send_from_directory(os.path.abspath(_batch_path(batch_id)), filename)
+
+
+@app.route("/local/<path:key>")
+def local_photo(key):
+    """개발 모드(S3 없이 저장)에서 tmp/_local_store 사진을 보여주는 경로"""
+    if storage.mode() != "local":
+        abort(404)
+    return send_from_directory(os.path.abspath(storage.LOCAL_STORE), key)
 
 
 if __name__ == "__main__":

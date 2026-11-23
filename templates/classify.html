@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}보관할 사진 고르기 · Pick & Keep{% endblock %}
 
-{# ---------- 카드 하나 (모든 칸에서 같이 씀) ---------- #}
+{% block body_class %}picking{% endblock %}
+
+{# ---------- 사진 한 장 (모든 칸에서 같이 씀) ---------- #}
 {% macro photo_card(p, current_group, review=false) %}
 {% set gl = (p.labels | selectattr('name', 'equalto', p.group_label) | list | first) if p.group_label else none %}
 <article class="card"
@@ -12,69 +14,70 @@
          data-dest="skip"
          data-size="{{ p.size or 0 }}">
   {% if p.thumb %}<img src="{{ url_for('tmp_image', batch_id=batch_id, filename=p.thumb) }}" alt="{{ p.original_name }}" loading="lazy">{% endif %}
-  <div class="card-body">
-    <p class="name">{{ p.original_name }}</p>
+  <p class="no"></p>
+  <p class="name" title="{{ p.original_name }}">{{ p.original_name }}</p>
+  {% if p.error %}<p class="error">분류 실패: {{ p.error }}</p>{% endif %}
 
-    {% if p.error %}<p class="error">분류 실패: {{ p.error }}</p>{% endif %}
-
+  <div class="info">
     <!-- 그룹 바꾸기: 누르면 목록이 열림 -->
-    <label class="group-pick">
+    <label>
       <span class="sr-only">그룹</span>
       <select class="group-select" aria-label="그룹 바꾸기">
-        {% if review %}<option value="" selected disabled>🤔 골라주세요</option>{% endif %}
+        {% if review %}<option value="" selected disabled>그룹 고르기</option>{% endif %}
         {% for key, info in group_options %}
-        <option value="{{ key }}" {% if not review and key == current_group %}selected{% endif %}>{{ info.emoji }} {{ info.name }}</option>
+        <option value="{{ key }}" {% if not review and key == current_group %}selected{% endif %}>{{ info.name }}</option>
         {% endfor %}
       </select>
     </label>
-    <span class="changed-mark" hidden>✋ 직접 변경</span>
 
     <!-- AI가 왜 이렇게 골랐는지 -->
     {% if review %}
-      <p class="ai-why review-why">스크린샷 단서: {{ (p.review_reasons or [])|join(', ') }}</p>
-      {% set gi = group_info[p.group or 'etc'] %}
-      <p class="ai-why">사진이라면 → {{ gi.emoji }} {{ gi.name }}</p>
+      <span class="ai-why review-why">스크린샷 단서: {{ (p.review_reasons or [])|join(', ') }}</span>
     {% elif p.is_screenshot %}
-      <p class="ai-why">AI: {% if p.method == 'status_bar' %}맨 위 시계로 판별{% elif p.method == 'rules' %}규칙으로 판별 (점수 {{ p.score }}){% else %}글자 {{ p.text_lines }}줄 감지{% endif %}</p>
+      <span class="ai-why">{% if p.method == 'status_bar' %}맨 위 시계로 판별{% elif p.method == 'rules' %}규칙으로 판별 ({{ p.score }}점){% else %}글자 {{ p.text_lines }}줄{% endif %}</span>
     {% elif gl %}
-      <p class="ai-why">AI: {{ gl.name }} {{ gl.confidence }}%</p>
+      <span class="ai-why">{{ gl.name }} {{ gl.confidence }}%</span>
     {% elif not p.error %}
-      <p class="ai-why">AI: 맞는 그룹이 없어요</p>
+      <span class="ai-why">맞는 그룹 없음</span>
     {% endif %}
+    <span class="changed-mark" hidden>직접 바꿈</span>
+  </div>
+  {% if review %}{% set gi = group_info[p.group or 'etc'] %}<p class="sub-why">사진이라면 → {{ gi.name }}</p>{% endif %}
 
-    {% if p.labels %}
-    <details class="all-labels">
-      <summary>라벨 {{ p.labels|length }}개</summary>
-      <ul class="labels">{% for l in p.labels %}<li>{{ l.name }} <span>{{ l.confidence }}%</span></li>{% endfor %}</ul>
-    </details>
-    {% endif %}
+  {% if p.labels %}
+  <details class="all-labels">
+    <summary>라벨 {{ p.labels|length }}개 보기</summary>
+    <ul class="labels">{% for l in p.labels %}<li>{{ l.name }} <span>{{ l.confidence }}%</span></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
 
-    <!-- 이 사진의 보관 위치 -->
-    <div class="dest" role="group" aria-label="보관 위치">
-      <button type="button" data-dest="keep">평생</button>
-      <button type="button" data-dest="hold">보류</button>
-      <button type="button" data-dest="skip" class="on">안 함</button>
-    </div>
+  <!-- 이 사진의 보관 위치 -->
+  <div class="dest" role="group" aria-label="이 사진 보관 위치">
+    <button type="button" data-dest="keep">평생</button>
+    <button type="button" data-dest="hold">보류</button>
+    <button type="button" data-dest="skip" class="on">안 함</button>
   </div>
 </article>
 {% endmacro %}
 
 {# ---------- 그룹 칸 머리 (이름 + 그룹 전체 보관 위치) ---------- #}
-{% macro group_head(emoji, name) %}
+{% macro group_head(name) %}
 <div class="group-head">
-  <h2><span class="group-emoji">{{ emoji }}</span> {{ name }} <span class="group-count"></span></h2>
-  <div class="dest group-dest" role="group" aria-label="이 그룹 전부">
-    <span class="dest-label">이 그룹 전부</span>
-    <button type="button" data-dest="keep">평생 보관함</button>
-    <button type="button" data-dest="hold">보류함</button>
-    <button type="button" data-dest="skip">저장 안 함</button>
+  <h2>{{ name }}<span class="group-count"></span></h2>
+  <div class="dest group-dest" role="group" aria-label="{{ name }} 전부">
+    <span class="group-note"></span>
+    <div class="seg">
+      <button type="button" data-dest="keep">평생 보관</button>
+      <button type="button" data-dest="hold">보류</button>
+      <button type="button" data-dest="skip">저장 안 함</button>
+    </div>
   </div>
 </div>
 {% endmacro %}
 
 {% block content %}
-<h1>보관할 사진 고르기</h1>
-<p class="muted">그룹별로 보관 위치를 고르세요. AI가 잘못 분류했다면 그룹 이름을 눌러 바꿀 수 있어요.</p>
+<h1 class="page-title">보관할 사진 고르기</h1>
+<p class="page-sub">묶음마다 한 번에 정하고, 다르게 둘 사진만 아래에서 바꿔요.<br>AI가 잘못 묶었다면 사진 아래 그룹 이름을 눌러 옮길 수 있어요.</p>
 {% if storage_mode == 'local' %}
 <p class="flash">개발 모드: 아직 S3에 저장하지 않고 이 컴퓨터의 <code>tmp/_local_store</code>에 저장해요.</p>
 {% endif %}
@@ -84,9 +87,9 @@
 <!-- 확인 필요 -->
 <section class="group g-review" id="group-review" data-section="review">
   <div class="group-head">
-    <h2><span class="group-emoji">🤔</span> 스크린샷인지 확인해 주세요 <span class="group-count"></span></h2>
+    <h2>확인이 필요해요<span class="group-count"></span></h2>
   </div>
-  <p class="muted review-help" data-has="사진 같기도 하고 스크린샷 같기도 해서 AI가 정하지 않았어요. 그룹 이름을 눌러 골라주세요."
+  <p class="muted review-help" data-has="사진인지 스크린샷인지 AI가 정하지 못했어요. 사진마다 그룹을 골라 주세요."
      data-empty="확인이 필요한 사진이 없어요.">확인이 필요한 사진이 없어요.</p>
   <div class="grid">
     {% for p in reviews %}{{ photo_card(p, '', true) }}{% endfor %}
@@ -97,7 +100,7 @@
 {% for key, info in group_options if key != 'screenshot' %}
 {% set g = groups | selectattr('key', 'equalto', key) | list | first %}
 <section class="group g-{{ key }}" id="group-{{ key }}" data-section="{{ key }}">
-  {{ group_head(info.emoji, info.name) }}
+  {{ group_head(info.name) }}
   <div class="grid">
     {% if g %}{% for p in g.photos %}{{ photo_card(p, key) }}{% endfor %}{% endif %}
   </div>
@@ -105,7 +108,7 @@
 {% endfor %}
 
 <section class="group g-screenshot" id="group-screenshot" data-section="screenshot">
-  {{ group_head('📱', '스크린샷') }}
+  {{ group_head('스크린샷') }}
   <div class="grid">
     {% for p in screenshots %}{{ photo_card(p, 'screenshot') }}{% endfor %}
   </div>
@@ -133,9 +136,9 @@
 <!-- 아래 고정: 요약 + 저장 -->
 <div class="save-bar" id="save-bar">
   <div class="save-summary">
-    <span><b id="n-keep">0</b> 평생</span>
-    <span><b id="n-hold">0</b> 보류</span>
-    <span><b id="n-skip">0</b> 안 함</span>
+    <span><b id="n-keep">0</b>평생</span>
+    <span><b id="n-hold">0</b>보류</span>
+    <span><b id="n-skip">0</b>안 함</span>
     <span class="save-size" id="save-size"></span>
   </div>
   <p class="save-warn" id="save-warn" hidden></p>
@@ -153,6 +156,7 @@
   // ---- 보관 위치 ----
   function setDest(card, dest) {
     card.dataset.dest = dest;
+    card.classList.add('touched');
     card.querySelectorAll('.dest button').forEach(b => b.classList.toggle('on', b.dataset.dest === dest));
   }
 
@@ -169,6 +173,20 @@
     refresh();
   }
 
+  // ---- 그룹 전체 버튼: 모든 사진이 같으면 그 버튼에 ✓, 섞여 있으면 몇 장씩인지 ----
+  const DEST_NAME = { keep: '평생', hold: '보류', skip: '안 함' };
+  function updateGroupButtons(sec) {
+    const gd = sec.querySelector('.group-dest');
+    if (!gd) return;
+    const count = { keep: 0, hold: 0, skip: 0 };
+    sec.querySelectorAll('.card').forEach(c => count[c.dataset.dest]++);
+    const used = Object.keys(count).filter(k => count[k]);
+    gd.querySelectorAll('button').forEach(b =>
+      b.classList.toggle('on', used.length === 1 && used[0] === b.dataset.dest));
+    gd.querySelector('.group-note').textContent = used.length > 1
+      ? used.map(k => `${DEST_NAME[k]} ${count[k]}`).join(' · ') : '';
+  }
+
   // ---- 칸 개수, 빈 칸 숨김, 바로가기 칩, 아래 요약 ----
   function refresh() {
     const chips = [];
@@ -176,6 +194,7 @@
       const n = sec.querySelectorAll('.card').length;
       const key = sec.dataset.section;
       sec.querySelector('.group-count').textContent = `${n}장`;
+      updateGroupButtons(sec);
       if (key === 'review') {
         const help = sec.querySelector('.review-help');
         help.textContent = n ? help.dataset.has : help.dataset.empty;
@@ -184,11 +203,15 @@
         sec.hidden = n === 0;
       }
       if (n) {
-        const info = key === 'review' ? {emoji: '🤔', name: '확인 필요'} : infoOf(key);
-        chips.push(`<a class="chip g-${key}" href="#group-${key}">${info.emoji} ${info.name} <b>${n}</b></a>`);
+        const info = key === 'review' ? {name: '확인 필요'} : infoOf(key);
+        chips.push(`<a class="chip g-${key}" href="#group-${key}">${info.name}<b>${n}</b></a>`);
       }
     });
     document.getElementById('chips').innerHTML = chips.join('');
+
+    // 보이는 순서대로 사진 번호 ( 1 ) ( 2 ) ...
+    let no = 0;
+    cards().forEach(c => { if (!c.closest('[hidden]')) c.querySelector('.no').textContent = ++no; });
 
     const count = { keep: 0, hold: 0, skip: 0 };
     let bytes = 0;
