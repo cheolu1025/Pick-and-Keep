@@ -1,63 +1,260 @@
 {% extends "base.html" %}
-{% block title %}분류 결과 · Pick & Keep{% endblock %}
+{% block title %}보관할 사진 고르기 · Pick & Keep{% endblock %}
+
+{# ---------- 카드 하나 (모든 칸에서 같이 씀) ---------- #}
+{% macro photo_card(p, current_group, review=false) %}
+{% set gl = (p.labels | selectattr('name', 'equalto', p.group_label) | list | first) if p.group_label else none %}
+<article class="card"
+         data-photo-id="{{ p.photo_id }}"
+         data-ai-group="{{ 'screenshot' if p.is_screenshot else (p.group or 'etc') }}"
+         data-group="{{ '' if review else current_group }}"
+         data-review="{{ '1' if review else '' }}"
+         data-dest="skip"
+         data-size="{{ p.size or 0 }}">
+  {% if p.thumb %}<img src="{{ url_for('tmp_image', batch_id=batch_id, filename=p.thumb) }}" alt="{{ p.original_name }}" loading="lazy">{% endif %}
+  <div class="card-body">
+    <p class="name">{{ p.original_name }}</p>
+
+    {% if p.error %}<p class="error">분류 실패: {{ p.error }}</p>{% endif %}
+
+    <!-- 그룹 바꾸기: 누르면 목록이 열림 -->
+    <label class="group-pick">
+      <span class="sr-only">그룹</span>
+      <select class="group-select" aria-label="그룹 바꾸기">
+        {% if review %}<option value="" selected disabled>🤔 골라주세요</option>{% endif %}
+        {% for key, info in group_options %}
+        <option value="{{ key }}" {% if not review and key == current_group %}selected{% endif %}>{{ info.emoji }} {{ info.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <span class="changed-mark" hidden>✋ 직접 변경</span>
+
+    <!-- AI가 왜 이렇게 골랐는지 -->
+    {% if review %}
+      <p class="ai-why review-why">스크린샷 단서: {{ (p.review_reasons or [])|join(', ') }}</p>
+      {% set gi = group_info[p.group or 'etc'] %}
+      <p class="ai-why">사진이라면 → {{ gi.emoji }} {{ gi.name }}</p>
+    {% elif p.is_screenshot %}
+      <p class="ai-why">AI: {% if p.method == 'status_bar' %}맨 위 시계로 판별{% elif p.method == 'rules' %}규칙으로 판별 (점수 {{ p.score }}){% else %}글자 {{ p.text_lines }}줄 감지{% endif %}</p>
+    {% elif gl %}
+      <p class="ai-why">AI: {{ gl.name }} {{ gl.confidence }}%</p>
+    {% elif not p.error %}
+      <p class="ai-why">AI: 맞는 그룹이 없어요</p>
+    {% endif %}
+
+    {% if p.labels %}
+    <details class="all-labels">
+      <summary>라벨 {{ p.labels|length }}개</summary>
+      <ul class="labels">{% for l in p.labels %}<li>{{ l.name }} <span>{{ l.confidence }}%</span></li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+
+    <!-- 이 사진의 보관 위치 -->
+    <div class="dest" role="group" aria-label="보관 위치">
+      <button type="button" data-dest="keep">평생</button>
+      <button type="button" data-dest="hold">보류</button>
+      <button type="button" data-dest="skip" class="on">안 함</button>
+    </div>
+  </div>
+</article>
+{% endmacro %}
+
+{# ---------- 그룹 칸 머리 (이름 + 그룹 전체 보관 위치) ---------- #}
+{% macro group_head(emoji, name) %}
+<div class="group-head">
+  <h2><span class="group-emoji">{{ emoji }}</span> {{ name }} <span class="group-count"></span></h2>
+  <div class="dest group-dest" role="group" aria-label="이 그룹 전부">
+    <span class="dest-label">이 그룹 전부</span>
+    <button type="button" data-dest="keep">평생 보관함</button>
+    <button type="button" data-dest="hold">보류함</button>
+    <button type="button" data-dest="skip">저장 안 함</button>
+  </div>
+</div>
+{% endmacro %}
+
 {% block content %}
-<h1>분류 결과</h1>
-<p class="muted">사진 {{ photos|length }}장 · 스크린샷 {{ screenshots|length }}장</p>
+<h1>보관할 사진 고르기</h1>
+<p class="muted">그룹별로 보관 위치를 고르세요. AI가 잘못 분류했다면 그룹 이름을 눌러 바꿀 수 있어요.</p>
+{% if storage_mode == 'local' %}
+<p class="flash">개발 모드: 아직 S3에 저장하지 않고 이 컴퓨터의 <code>tmp/_local_store</code>에 저장해요.</p>
+{% endif %}
 
-<h2>사진</h2>
-<div class="grid">
-  {% for p in photos %}
-  <article class="card">
-    {% if p.thumb %}<img src="{{ url_for('tmp_image', batch_id=batch_id, filename=p.thumb) }}" alt="{{ p.original_name }}">{% endif %}
-    <div class="card-body">
-      <p class="name">{{ p.original_name }}</p>
-      {% if p.error %}
-        <p class="error">분류 실패: {{ p.error }}</p>
-      {% else %}
-        <ul class="labels">
-          {% for l in p.labels %}<li>{{ l.name }} <span>{{ l.confidence }}%</span></li>{% endfor %}
-        </ul>
-      {% endif %}
-    </div>
-  </article>
-  {% else %}
-  <p class="muted">일반 사진이 없어요.</p>
-  {% endfor %}
-</div>
+<nav class="group-chips" id="chips"></nav>
 
-<h2>스크린샷</h2>
-<div class="grid">
-  {% for p in screenshots %}
-  <article class="card">
-    {% if p.thumb %}<img src="{{ url_for('tmp_image', batch_id=batch_id, filename=p.thumb) }}" alt="{{ p.original_name }}">{% endif %}
-    <div class="card-body">
-      <p class="name">{{ p.original_name }}</p>
-      <p class="method">
-        {% if p.method == 'rules' %}규칙으로 판별 (점수 {{ p.score }}){% else %}글자 {{ p.text_lines }}줄 감지{% endif %}
-      </p>
-    </div>
-  </article>
-  {% else %}
-  <p class="muted">스크린샷이 없어요.</p>
-  {% endfor %}
-</div>
+<!-- 확인 필요 -->
+<section class="group g-review" id="group-review" data-section="review">
+  <div class="group-head">
+    <h2><span class="group-emoji">🤔</span> 스크린샷인지 확인해 주세요 <span class="group-count"></span></h2>
+  </div>
+  <p class="muted review-help" data-has="사진 같기도 하고 스크린샷 같기도 해서 AI가 정하지 않았어요. 그룹 이름을 눌러 골라주세요."
+     data-empty="확인이 필요한 사진이 없어요.">확인이 필요한 사진이 없어요.</p>
+  <div class="grid">
+    {% for p in reviews %}{{ photo_card(p, '', true) }}{% endfor %}
+  </div>
+</section>
+
+<!-- 그룹들: 비어 있는 그룹도 미리 만들어 두고 숨긴다 (사진을 옮겨 올 수 있게) -->
+{% for key, info in group_options if key != 'screenshot' %}
+{% set g = groups | selectattr('key', 'equalto', key) | list | first %}
+<section class="group g-{{ key }}" id="group-{{ key }}" data-section="{{ key }}">
+  {{ group_head(info.emoji, info.name) }}
+  <div class="grid">
+    {% if g %}{% for p in g.photos %}{{ photo_card(p, key) }}{% endfor %}{% endif %}
+  </div>
+</section>
+{% endfor %}
+
+<section class="group g-screenshot" id="group-screenshot" data-section="screenshot">
+  {{ group_head('📱', '스크린샷') }}
+  <div class="grid">
+    {% for p in screenshots %}{{ photo_card(p, 'screenshot') }}{% endfor %}
+  </div>
+</section>
 
 <details class="debug">
   <summary>판별 근거 보기 (개발용)</summary>
   <table>
-    <tr><th>파일</th><th>결과</th><th>방법</th><th>점수</th><th>글자 줄</th><th>근거</th></tr>
-    {% for p in photos + screenshots %}
+    <tr><th>파일</th><th>결과</th><th>그룹</th><th>기준 라벨</th><th>방법</th><th>점수</th><th>글자 줄</th><th>근거</th></tr>
+    {% for p in all_results %}
     <tr>
       <td>{{ p.original_name }}</td>
-      <td>{{ '스크린샷' if p.is_screenshot else '사진' }}</td>
+      <td>{{ '스크린샷' if p.is_screenshot else ('확인 필요' if p.review else '사진') }}</td>
+      <td>{{ p.group or '-' }}</td>
+      <td>{{ p.group_label or '-' }}</td>
       <td>{{ p.method }}</td>
       <td>{{ p.score }}</td>
       <td>{{ p.text_lines if p.text_lines is not none else '-' }}</td>
-      <td>{{ (p.reasons or [])|join(', ') }}</td>
+      <td>{{ ((p.reasons or []) + (p.review_reasons or []))|join(', ') }}</td>
     </tr>
     {% endfor %}
   </table>
 </details>
 
-<p><a class="button-secondary" href="{{ url_for('index') }}">다른 사진 올리기</a></p>
+<!-- 아래 고정: 요약 + 저장 -->
+<div class="save-bar" id="save-bar">
+  <div class="save-summary">
+    <span><b id="n-keep">0</b> 평생</span>
+    <span><b id="n-hold">0</b> 보류</span>
+    <span><b id="n-skip">0</b> 안 함</span>
+    <span class="save-size" id="save-size"></span>
+  </div>
+  <p class="save-warn" id="save-warn" hidden></p>
+  <button type="button" id="save-btn">저장하기</button>
+</div>
+
+<script>
+(() => {
+  const BATCH = {{ batch_id|tojson }};
+  const INFO = {{ group_options|tojson }};   // [[key, {name, emoji}], ...]
+  const infoOf = key => (INFO.find(([k]) => k === key) || [key, {name: key, emoji: ''}])[1];
+  const cards = () => Array.from(document.querySelectorAll('.card[data-photo-id]'));
+  const section = key => document.querySelector(`[data-section="${key}"]`);
+
+  // ---- 보관 위치 ----
+  function setDest(card, dest) {
+    card.dataset.dest = dest;
+    card.querySelectorAll('.dest button').forEach(b => b.classList.toggle('on', b.dataset.dest === dest));
+  }
+
+  // ---- 그룹 바꾸기: 카드를 다른 칸으로 옮김 ----
+  function moveTo(card, key) {
+    card.dataset.group = key;
+    const changed = key !== card.dataset.aiGroup;
+    card.querySelector('.changed-mark').hidden = !changed;
+    card.classList.toggle('is-changed', changed);
+    section(key).querySelector('.grid').appendChild(card);
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('just-moved');
+    setTimeout(() => card.classList.remove('just-moved'), 1200);
+    refresh();
+  }
+
+  // ---- 칸 개수, 빈 칸 숨김, 바로가기 칩, 아래 요약 ----
+  function refresh() {
+    const chips = [];
+    document.querySelectorAll('[data-section]').forEach(sec => {
+      const n = sec.querySelectorAll('.card').length;
+      const key = sec.dataset.section;
+      sec.querySelector('.group-count').textContent = `${n}장`;
+      if (key === 'review') {
+        const help = sec.querySelector('.review-help');
+        help.textContent = n ? help.dataset.has : help.dataset.empty;
+        sec.classList.toggle('is-empty', n === 0);
+      } else {
+        sec.hidden = n === 0;
+      }
+      if (n) {
+        const info = key === 'review' ? {emoji: '🤔', name: '확인 필요'} : infoOf(key);
+        chips.push(`<a class="chip g-${key}" href="#group-${key}">${info.emoji} ${info.name} <b>${n}</b></a>`);
+      }
+    });
+    document.getElementById('chips').innerHTML = chips.join('');
+
+    const count = { keep: 0, hold: 0, skip: 0 };
+    let bytes = 0;
+    cards().forEach(c => {
+      if (!c.dataset.group) return;           // 확인 필요는 아직 셈에서 뺌
+      count[c.dataset.dest]++;
+      if (c.dataset.dest !== 'skip') bytes += Number(c.dataset.size);
+    });
+    for (const k in count) document.getElementById('n-' + k).textContent = count[k];
+    document.getElementById('save-size').textContent =
+      bytes ? `저장 ${(bytes / 1024 / 1024).toFixed(1)}MB` : '';
+
+    const pending = section('review').querySelectorAll('.card').length;
+    const warn = document.getElementById('save-warn');
+    const btn = document.getElementById('save-btn');
+    warn.hidden = pending === 0;
+    warn.textContent = pending ? `확인 필요 사진 ${pending}장을 먼저 골라주세요` : '';
+    btn.disabled = pending > 0;
+  }
+
+  // ---- 이벤트 ----
+  document.addEventListener('change', e => {
+    if (!e.target.matches('.group-select')) return;
+    moveTo(e.target.closest('.card'), e.target.value);
+  });
+
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.dest button');
+    if (!b) return;
+    if (b.closest('.group-dest')) {          // 그룹 전체
+      b.closest('[data-section]').querySelectorAll('.card').forEach(c => setDest(c, b.dataset.dest));
+    } else {                                 // 사진 하나
+      setDest(b.closest('.card'), b.dataset.dest);
+    }
+    refresh();
+  });
+
+  document.getElementById('save-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('save-btn');
+    const decisions = cards().filter(c => c.dataset.group).map(c => ({
+      photo_id: c.dataset.photoId,
+      group: c.dataset.group,
+      dest: c.dataset.dest,
+      changed: c.dataset.group !== c.dataset.aiGroup,
+      review: !!c.dataset.review,             // 확인 필요였던 사진 (AI가 정하지 않음)
+    }));
+    const n = decisions.filter(d => d.dest !== 'skip').length;
+    if (!n && !confirm('저장할 사진이 없어요. 이대로 끝낼까요?')) return;
+    btn.disabled = true;
+    btn.textContent = `저장 중... (${n}장)`;
+    try {
+      const res = await fetch(`/batch/${BATCH}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisions }),
+      });
+      window.location = (await res.json()).redirect;
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = '저장하기';
+      document.getElementById('save-warn').hidden = false;
+      document.getElementById('save-warn').textContent = '저장 중 연결이 끊겼어요. 다시 눌러주세요.';
+    }
+  });
+
+  refresh();
+})();
+</script>
 {% endblock %}

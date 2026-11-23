@@ -44,6 +44,9 @@
 
   input.addEventListener('change', () => {
     count.textContent = input.files.length ? `${input.files.length}장 선택됨` : '';
+    count.classList.remove('count-warn');
+    // 사진을 골랐으면 위에 남아 있던 안내 메시지("사진을 선택해 주세요" 등)는 지운다
+    if (input.files.length) document.querySelectorAll('.flash').forEach(el => el.remove());
   });
 
   // 진행률에 따라 빨강(0~32%) → 주황(33~65%) → 초록(66~100%)
@@ -59,8 +62,12 @@
 
   form.addEventListener('submit', async (e) => {
     const files = Array.from(input.files);
-    if (!files.length) return;          // 선택 안 했으면 서버가 안내 (예비 경로)
     e.preventDefault();
+    if (!files.length) {                // 페이지를 새로 고치지 않고 그 자리에서 안내
+      count.textContent = '사진을 먼저 선택해 주세요';
+      count.classList.add('count-warn');
+      return;
+    }
 
     const ok = files.filter(f => ALLOWED.some(ext => f.name.toLowerCase().endsWith(ext)));
     const skipped = files.filter(f => !ok.includes(f)).map(f => f.name);

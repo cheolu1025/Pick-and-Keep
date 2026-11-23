@@ -93,6 +93,21 @@ def get_image_info(path: str) -> dict:
         }
 
 
+def flat_color_ratio(path: str, sample_side: int = 256) -> float:
+    """가장 많은 '완전히 같은 색' 픽셀이 차지하는 비율 (0~1).
+    스크린샷·그래픽은 배경이 한 색이라 이 값이 크고,
+    카메라 사진은 센서 노이즈 때문에 같은 색 픽셀이 거의 없어 작다."""
+    with Image.open(path) as img:
+        img = img.convert("RGB")
+        # NEAREST로 줄여야 색이 섞이지 않아 '완전히 같은 색'이 유지된다
+        img.thumbnail((sample_side, sample_side), Image.NEAREST)
+        colors = img.getcolors(maxcolors=img.width * img.height)
+        if not colors:
+            return 0.0
+        top = max(c for c, _ in colors)
+        return top / (img.width * img.height)
+
+
 def file_hash(path: str) -> str:
     """같은 사진 재업로드 판별용 SHA-256 (3주차 캐시에서 사용)"""
     h = hashlib.sha256()

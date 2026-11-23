@@ -4,10 +4,12 @@
   POST /batch                       → 업로드 묶음(batch) 만들기, batch_id 반환
   POST /batch/<batch_id>/photo      → 사진 한 장 분류, 결과 반환
   POST /batch/<batch_id>/finish     → 결과 모아서 result.json 저장
-  GET  /classify/<batch_id>         → 분류 결과 화면
+  GET  /classify/<batch_id>         → 분류 결과 + 보관 위치 선택 화면
+  POST /batch/<batch_id>/save       → 고른 사진 저장 (storage.py → A의 함수)
+  GET  /saved/<batch_id>            → 저장 완료 화면
 POST /upload 는 자바스크립트가 꺼져 있을 때를 위한 예비 경로 (한 번에 전부 처리)
 
-3주차 이후: /save, /keep, /hold, /stats 는 A의 함수가 준비되면 연결
+이후: /keep, /hold, /stats 는 A의 함수가 준비되면 연결
 """
 import json
 import os
@@ -21,6 +23,7 @@ from flask import (Flask, abort, flash, jsonify, redirect, render_template,
 
 import classify
 import image_utils
+import storage
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-me")
@@ -147,9 +150,79 @@ def classify_view(batch_id):
     with open(result_file, encoding="utf-8") as fp:
         results = json.load(fp)
     screenshots = [r for r in results if r.get("is_screenshot")]
-    photos = [r for r in results if not r.get("is_screenshot")]
-    return render_template("classify.html", batch_id=batch_id,
-                           photos=photos, screenshots=screenshots)
+    reviews = [r for r in results if r.get("review")]
+    groups = classify.group_photos(results)
+    photo_count = sum(len(g["photos"]) for g in groups)
+    # 그룹 바꾸기 목록: 9개 그룹 + 스크린샷
+    group_options = [(k, classify.GROUP_INFO[k]) for k in classify.GROUP_ORDER]
+    group_options.append(("screenshot", {"name": "스크린샷", "emoji": "📱"}))
+    return render_template("classify.html", batch_id=batch_id, groups=groups,
+                           photo_count=photo_count, screenshots=screenshots,
+                           reviews=reviews, group_info=classify.GROUP_INFO,
+                           group_options=group_options, all_results=results,
+                           storage_mode=storage.mode())
+
+
+VALID_DEST = {"keep", "hold", "skip"}
+
+
+@app.route("/batch/<batch_id>/save", methods=["POST"])
+def save_batch(batch_id):
+    """화면에서 고른 결과를 받아 keep/hold 사진만 저장한다.
+    받는 값: {"decisions": [{"photo_id", "group", "dest", "changed"}, ...]}"""
+    batch_path = _batch_path(batch_id)
+    with open(os.path.join(batch_path, "result.json"), encoding="utf-8") as fp:
+        results = {r["photo_id"]: r for r in json.load(fp)}
+
+    valid_groups = set(classify.GROUP_ORDER) | {"screenshot"}
+    decisions = (request.get_json(silent=True) or {}).get("decisions", [])
+    summary = {"keep": 0, "hold": 0, "skip": 0, "duplicate": 0, "failed": 0,
+               "saved_size": 0, "changed": 0, "classified": 0, "mode": storage.mode()}
+
+    for d in decisions:
+        r = results.get(d.get("photo_id"))
+        dest, group = d.get("dest"), d.get("group")
+        if not r or dest not in VALID_DEST or group not in valid_groups:
+            continue
+        r["final_group"], r["dest"], r["user_changed"] = group, dest, bool(d.get("changed"))
+
+        # AI가 분류한 사진 중 사용자가 그룹을 바꾼 수 → 실제 사용 정확도
+        # (확인 필요 사진은 AI가 정하지 않았으므로 빼고 센다)
+        if not r.get("error") and not d.get("review"):
+            summary["classified"] += 1
+            summary["changed"] += r["user_changed"]
+
+        if dest == "skip":
+            summary["skip"] += 1
+            continue
+        try:
+            out = storage.save_photo(r, dest)
+        except Exception:
+            app.logger.exception("저장 실패: %s", r["original_name"])
+            summary["failed"] += 1
+            r["save_status"] = "failed"
+            continue
+        r["save_status"] = out["status"]
+        if out["status"] == "duplicate":
+            summary["duplicate"] += 1
+        else:
+            summary[dest] += 1
+            summary["saved_size"] += r["size"]
+
+    with open(os.path.join(batch_path, "saved.json"), "w", encoding="utf-8") as fp:
+        json.dump({"summary": summary, "results": list(results.values())}, fp,
+                  ensure_ascii=False, indent=2)
+    return jsonify(redirect=url_for("saved_view", batch_id=batch_id))
+
+
+@app.route("/saved/<batch_id>")
+def saved_view(batch_id):
+    path = os.path.join(_batch_path(batch_id), "saved.json")
+    if not os.path.exists(path):
+        return redirect(url_for("classify_view", batch_id=batch_id))
+    with open(path, encoding="utf-8") as fp:
+        data = json.load(fp)
+    return render_template("saved.html", s=data["summary"])
 
 
 @app.route("/tmp/<batch_id>/<filename>")
