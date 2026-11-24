@@ -1,0 +1,21 @@
+# systemd service: runs the Flask app with gunicorn and restarts it if it stops.
+# Installed by deploy/setup_web.sh to /etc/systemd/system/pickandkeep.service
+#   status : sudo systemctl status pickandkeep
+#   restart: sudo systemctl restart pickandkeep   (needed after .env or code changes)
+#   logs   : journalctl -u pickandkeep -n 50
+[Unit]
+Description=Pick & Keep web app (gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Pick-and-Keep
+# 2 processes x 4 threads. --timeout 120: uploading many photos can exceed the
+# 30 s default and cause 502 errors (team guide 4-3). Only nginx talks to port 8000.
+ExecStart=/home/ubuntu/Pick-and-Keep/venv/bin/gunicorn --workers 2 --threads 4 --timeout 120 --bind 127.0.0.1:8000 --access-logfile - app:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
