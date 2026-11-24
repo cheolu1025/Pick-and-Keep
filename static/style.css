@@ -250,3 +250,65 @@ body.picking { padding-bottom: 110px; }
   body.picking { padding-bottom: 130px; }
   .page-title { font-size: 1.7rem; }
 }
+
+/* ---------- 보관함 (평생 보관함, 보류함, 크게 보기, 확보 용량) ---------- */
+.nav { display: flex; gap: 18px; font-size: .84rem; }
+.nav a { text-decoration: none; color: var(--muted); }
+.nav a:hover, .nav a[aria-current="page"] { color: var(--ink); }
+.nav a[aria-current="page"] { border-bottom: 1px solid var(--ink); }
+.panel-top .nav { gap: 14px; font-size: .78rem; }
+
+/* 첫 화면 배너: 오래 안 본 보류함 사진 */
+.banner {
+  display: flex; gap: 14px; align-items: center; justify-content: center; flex-wrap: wrap;
+  margin: -8px 0 22px; padding: 10px 16px; text-decoration: none; font-size: .88rem;
+  color: var(--hold); border: 1px solid var(--hold); background: #fff;
+}
+.banner span { font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+.vault-filter { text-align: center; margin: -10px 0 0; font-size: .86rem; }
+.vault-filter a { color: var(--hold); }
+.vault-thumb { display: block; }
+.vault-card .info { margin-top: 2px; }
+.vault-card .name { color: var(--muted); margin-top: 12px; font-size: .8rem; }
+.remain { color: var(--muted); }
+.vault-card.is-old .remain { color: var(--hold); font-weight: 600; }
+.vault-card.is-old img { outline: 1px dashed var(--hold); outline-offset: 5px; }
+.vault-actions form { display: contents; }
+.empty { text-align: center; margin: 70px 0; color: var(--muted); }
+.empty p { margin-bottom: 22px; }
+
+/* 크게 보기 */
+.back { margin: 10px 0 18px; font-size: .88rem; }
+.back a { color: var(--muted); text-decoration: none; }
+.back a:hover { color: var(--ink); }
+.photo-big { margin: 0; background: var(--film); padding: 14px; text-align: center; }
+.photo-big img { max-width: 100%; max-height: 78vh; object-fit: contain; display: inline-block; vertical-align: middle; }
+.photo-meta { max-width: 640px; margin: 28px auto 0; }
+.photo-meta h1 { font-family: var(--serif); font-size: 1.35rem; margin: 0 0 16px; word-break: break-all; }
+.photo-meta dl { margin: 0; border-top: 1px solid var(--line); }
+.photo-meta dl div { display: flex; gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.photo-meta dt { width: 110px; color: var(--muted); flex: none; }
+.photo-meta dd { margin: 0; }
+.photo-labels { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .8rem; color: var(--muted); margin: 16px 0 0; }
+.photo-actions { display: flex; gap: 8px; margin-top: 26px; }
+
+/* 확보 용량 */
+.stats-hero { text-align: center; margin: 36px 0 10px; }
+.stats-hero b { display: block; font-family: var(--serif); font-size: 4.4rem; line-height: 1; }
+.stats-hero small { font-size: .35em; margin-left: 6px; color: var(--muted); }
+.stats-hero span { color: var(--muted); }
+a.saved-box { text-decoration: none; color: inherit; }
+a.saved-box:hover b { text-decoration: underline; text-underline-offset: 6px; }
+
+@media (max-width: 760px) {
+  .topbar { flex-wrap: wrap; gap: 8px; }
+  .nav { gap: 12px; font-size: .8rem; }
+  .vault-actions button { padding: 5px 6px; }
+  .photo-big { padding: 6px; }
+  .photo-meta dt { width: 90px; }
+}
+.vault-actions button { border-radius: 0 !important; margin-left: -1px !important; }
+.vault-actions form:first-child button { border-radius: 5px 0 0 5px !important; margin-left: 0 !important; }
+.vault-actions form:last-child button { border-radius: 0 5px 5px 0 !important; }
+.vault-actions form:last-child button:hover { color: var(--p-red); }

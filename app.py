@@ -25,6 +25,7 @@ import classify
 import db
 import image_utils
 import storage
+import vault
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-me")
@@ -78,7 +79,7 @@ def _save_results(batch_path: str, results: list) -> None:
 
 @app.route("/")
 def index():
-    return render_template("index.html", film=_film_photos(6))
+    return render_template("index.html", film=_film_photos(6), banner=vault.old_hold_banner())
 
 
 SAMPLE_DIR = os.path.join(app.static_folder, "sample")
@@ -99,16 +100,15 @@ def _sample_sets() -> list[list[str]]:
 
 
 def _film_photos(n: int) -> list[dict]:
-    """첫 화면 오른쪽 사진 n장: 최근 평생 보관한 사진을 먼저, 모자라면 기본 사진으로 채움.
+    """첫 화면 오른쪽 사진 n장: 항상 기본 사진(static/sample). 사용자 사진은 보관함 화면에서 본다.
     기본 사진 묶음이 여러 개면 첫 화면을 열 때마다 번갈아 보여준다 (session에 순번 저장)"""
-    photos = storage.recent_keep_photos(n)
     sets = _sample_sets()
-    if len(photos) < n and sets:
-        turn = session.get("film_set", -1) + 1
-        session["film_set"] = turn
-        for path in sets[turn % len(sets)][:n - len(photos)]:
-            photos.append({"url": url_for("static", filename=path), "name": "기본 사진"})
-    return photos
+    if not sets:
+        return []
+    turn = session.get("film_set", -1) + 1
+    session["film_set"] = turn
+    return [{"url": url_for("static", filename=path), "name": "기본 사진"}
+            for path in sets[turn % len(sets)][:n]]
 
 
 # ---------- 한 장씩 업로드 (진행률 표시용) ----------
@@ -262,6 +262,76 @@ def saved_view(batch_id):
 def tmp_image(batch_id, filename):
     """분류 결과 화면에 썸네일을 보여주기 위한 경로 (S3 저장 전 임시 사진)"""
     return send_from_directory(os.path.abspath(_batch_path(batch_id)), filename)
+
+
+# ---------- 보관함 (평생 보관함, 보류함, 크게 보기, 확보 용량) ----------
+
+@app.context_processor
+def _nav():
+    return {"vault_on": vault.available()}
+
+
+def _need_vault():
+    if not vault.available():
+        flash("보관함은 S3 버킷이 설정돼야 볼 수 있어요. .env의 S3_BUCKET_NAME을 확인해 주세요.")
+        return redirect(url_for("index"))
+    return None
+
+
+@app.route("/keep")
+@app.route("/hold")
+def vault_list():
+    if (r := _need_vault()):
+        return r
+    folder = request.path.strip("/")
+    only_old = folder == "hold" and request.args.get("old") == "1"
+    photos = vault.list_photos(folder)
+    if only_old:
+        photos = [p for p in photos if p["remain"]["old"]]
+    return render_template("vault.html", folder=folder, folder_name=vault.FOLDER_NAME[folder],
+                           photos=photos, only_old=only_old, period=db.hold_period_label())
+
+
+@app.route("/photo/<int:photo_id>")
+def photo_view(photo_id):
+    """사진 크게 보기. 여기서만 열람 시각이 기록된다 (보류함 알림 기간이 다시 시작됨)"""
+    if (r := _need_vault()):
+        return r
+    p = vault.open_photo(photo_id)
+    if p is None:
+        abort(404)
+    return render_template("photo.html", p=p, folder_name=vault.FOLDER_NAME[p["folder"]],
+                           period=db.hold_period_label())
+
+
+@app.route("/photo/<int:photo_id>/<action>", methods=["POST"])
+def photo_action(photo_id, action):
+    """보류함 버튼: delete(삭제), extend(기간 연장), keep(평생 보관함으로)"""
+    if (r := _need_vault()):
+        return r
+    do = {"delete": vault.delete, "extend": vault.extend, "keep": vault.move_to_keep}.get(action)
+    if do is None:
+        abort(404)
+    p = do(photo_id)
+    if p is None:
+        abort(404)
+    name = p["filename"]
+    if action == "delete":
+        flash(f"{name}을(를) 삭제했어요.")
+        return redirect("/" + p["folder"])
+    if action == "extend":
+        flash(f"{name}의 보관 기간을 {db.hold_period_label()} 늘렸어요.")
+    else:
+        flash(f"{name}을(를) 평생 보관함으로 옮겼어요.")
+    back = request.form.get("back", "")
+    return redirect(back if back.startswith("/") and not back.startswith("//") else f"/photo/{photo_id}")
+
+
+@app.route("/stats")
+def stats_view():
+    if (r := _need_vault()):
+        return r
+    return render_template("stats.html", s=vault.stats())
 
 
 @app.route("/local/<path:key>")

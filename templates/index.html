@@ -4,11 +4,15 @@
 {% block content %}
 <section class="hero">
   <div class="panel">
-    <div class="panel-top"><span>Pick &amp; Keep</span><span>평생 보관함 · 보류함</span></div>
+    <div class="panel-top"><span>Pick &amp; Keep</span>
+      {% if vault_on %}<nav class="nav"><a href="/keep">평생 보관함</a><a href="/hold">보류함</a><a href="/stats">확보 용량</a></nav>
+      {% else %}<span>평생 보관함 · 보류함</span>{% endif %}</div>
 
     <div class="panel-center">
       <h1 class="logo">Pick<i>&amp;</i>Keep</h1>
       <p class="tagline">찍어 둔 사진은 많아도<br>오래 남길 사진은 몇 장이에요</p>
+
+      {% if banner %}<a class="banner" href="/hold?old=1">{{ banner }}<span>보러 가기</span></a>{% endif %}
 
       {% with messages = get_flashed_messages() %}
         {% for m in messages %}<p class="flash">{{ m }}</p>{% endfor %}

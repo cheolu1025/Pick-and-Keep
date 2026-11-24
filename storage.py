@@ -80,19 +80,3 @@ def _save_local(r: dict, folder: str) -> dict:
         json.dump(index, fp, ensure_ascii=False, indent=2)
     return {"status": "saved", "key": key}
 
-
-# ---------- 첫 화면 오른쪽 필름: 최근 평생 보관한 사진 ----------
-def recent_keep_photos(limit: int = 6) -> list[dict]:
-    """최근 평생 보관함 사진 [{"url", "name"}]. 실패해도 첫 화면은 떠야 하므로 []를 돌려준다.
-    목록용이라 mark_viewed=False (A 요청: 목록만 봐도 '열람'으로 기록되면 안 됨)"""
-    try:
-        if mode() == "aws":
-            import aws_utils
-            import db
-            return [{"url": aws_utils.get_photo_url(p["s3_key"], mark_viewed=False),
-                     "name": p["filename"]}
-                    for p in db.get_photos("keep")[:limit]]
-        items = [i for i in _load_index() if i["folder"] == "keep"][-limit:][::-1]
-        return [{"url": f"/local/{i['key']}", "name": i["filename"]} for i in items]
-    except Exception:
-        return []

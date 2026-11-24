@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ p.filename }} · Pick & Keep{% endblock %}
+{% block content %}
+<p class="back"><a href="/{{ p.folder }}">← {{ folder_name }}</a></p>
+<figure class="photo-big">
+  <img src="{{ p.url }}" alt="{{ p.filename }}">
+</figure>
+<div class="photo-meta">
+  <h1>{{ p.filename }}</h1>
+  <dl>
+    <div><dt>보관 위치</dt><dd>{{ folder_name }}</dd></div>
+    <div><dt>저장한 날</dt><dd>{{ p.date }}</dd></div>
+    <div><dt>크기</dt><dd>{{ '%.1f' | format((p.size or 0) / 1024 / 1024) }}MB</dd></div>
+    {% if p.remain %}<div><dt>다음 확인까지</dt><dd>{{ p.remain.text }} <span class="muted">(방금 봐서 {{ period }}로 다시 시작)</span></dd></div>{% endif %}
+  </dl>
+  {% if p.labels %}
+  <p class="photo-labels">{% for l in p.labels[:8] %}<span>{{ l.name }} {{ l.confidence|round|int }}%</span>{% endfor %}</p>
+  {% endif %}
+  <div class="photo-actions">
+    {% if p.folder == 'hold' %}
+    <form method="post" action="/photo/{{ p.id }}/keep"><button class="btn btn-dark">평생 보관함으로</button></form>
+    {% endif %}
+    <form method="post" action="/photo/{{ p.id }}/delete" onsubmit="return confirm('이 사진을 보관함에서 지울까요? 되돌릴 수 없어요.')"><button class="btn">삭제</button></form>
+  </div>
+</div>
+{% endblock %}
