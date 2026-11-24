@@ -19,6 +19,7 @@
 | 🆕 v2.2 시연 모드 | 보류 기간을 `.env`로 설정. `get_old_hold_photos()`를 인자 없이 부르면 설정을 따름, `hold_period_label()` 추가. 알림 메일은 사진당 한 번만 (`notified_at` 열) | B: 배너에서 인자 없이 호출, 문구에 `hold_period_label()` 사용 |
 | 🆕 v2.2 사진 번호로 찾기 | `get_photo(photo_id)` 추가. 크게 보기·보류함 버튼은 `s3_key` 대신 `id`를 주고받음 (이동해도 id는 그대로) | B: `/photo/<id>` 형태로 사용 |
 | 🆕 v2.3 그룹 저장 | `photos.category` 열 추가, `save_photo_record(..., category=None)` 선택 인자, `update_category(photo_id, category)` 추가. 값은 그룹 **key**(`"food"`, `"screenshot"` 등), 화면 이름은 B의 `classify.GROUP_INFO` | B: 저장 때 `category=r["final_group"]`, 보관함에서 그룹 변경 시 `update_category` |
+| 🆕 v2.3 라이프사이클 + 시연 모드 | `keep/` 90일 → Glacier IR 라이프사이클 규칙. 라이프사이클은 일 단위라 시연용으로 `KEEP_DEMO_MINUTES=3`이면 `archive_keep.py`(cron 1분)가 3분 지난 `keep/` 사진을 바로 Glacier IR로 전환. S3 key 그대로 | 없음 (B 코드 변경 없음, 전환된 사진도 `get_photo_url`로 바로 열림) |
 | 🆕 v2.3 라벨 형식 | `labels` 항목에 `area`(사진에서 물체가 차지하는 비율)도 포함 가능. JSON으로 그대로 저장되므로 A 쪽 변경 없음 | 없음 |
 
 > 변경 기록과 이유는 `docs/PickAndKeep_기능정리_발표노트.md` 2장(결정 기록)에도 남긴다.
@@ -315,6 +316,7 @@ SQS_QUEUE_URL=       # 🆕 A: 실제 큐 / B: 본인 테스트 큐
 HOLD_DAYS=60         # 🆕 v2.2: 보류 기간(일). 없으면 60
 HOLD_DEMO_MINUTES=   # 🆕 v2.2: 시연 모드. 값(예: 2)이 있으면 보류 기간이 그 분(分)으로 바뀜. 평소엔 비워 둠
 SITE_URL=            # 🆕 v2.2: 알림 메일 속 링크 (비우면 EC2가 자기 현재 주소를 자동으로 넣음)
+KEEP_DEMO_MINUTES=   # 🆕 v2.3: 시연 모드. 값(예: 3)이 있으면 keep/ 사진이 그 분 뒤 Glacier IR로 전환. 평소엔 비워 둠 (A 서버만)
 ```
 - `.env`를 바꾸면 Flask를 재시작해야 반영됨 (서버에서는 A가 처리)
 
@@ -535,7 +537,7 @@ git checkout -b feature/b-ui      # B
 
 ## 9. 시연 준비 메모
 - 90일·60일은 기간 안에 볼 수 없으므로:
-  - 라이프사이클은 1일짜리 테스트 규칙으로 동작 확인
+  - 라이프사이클은 시연 모드 `KEEP_DEMO_MINUTES=3` (3분 뒤 Glacier IR 전환, S3 콘솔에서 저장 클래스 확인). 실제 규칙(90일)은 콘솔 라이프사이클 화면으로 보여 줌
   - 보류함은 DB의 `last_viewed`를 과거 날짜로 바꾸고 `check_hold.py` 직접 실행 → 배너와 SNS 메일 확인
 - 시연 전 EC2 퍼블릭 IP 확인 (Learner Lab 재시작 시 바뀜)
 - 시연 순서(안): 사진 업로드 → 종류별 그룹 확인 → 그룹 단위로 keep/hold 선택 → 보관함에서 사진 열기 → 확보 용량 확인 → 보류함 알림(배너, 이메일) → 삭제/연장/이동

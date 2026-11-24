@@ -18,6 +18,7 @@ TEST_DB = "test_a_infra.db"
 os.environ["DB_PATH"] = TEST_DB
 os.environ["HOLD_DAYS"] = "60"
 os.environ["HOLD_DEMO_MINUTES"] = ""
+os.environ["KEEP_DEMO_MINUTES"] = ""
 
 import db  # noqa: E402
 
@@ -114,6 +115,18 @@ def test_hold_alert() -> None:
     assert db.hold_period() == timedelta(days=60)
     os.environ["HOLD_DEMO_MINUTES"] = ""
     ok("hold_period / hold_period_label (60일, demo 2분, invalid -> 60일)")
+
+    import archive_keep
+    assert archive_keep.demo_period() is None  # off by default -> real lifecycle rule
+    os.environ["KEEP_DEMO_MINUTES"] = "3"
+    assert archive_keep.demo_period() == timedelta(minutes=3)
+    os.environ["KEEP_DEMO_MINUTES"] = ""
+    try:
+        archive_keep.archive_old_keep(timedelta(0), prefix="hold/")
+        raise AssertionError("hold/ prefix accepted")
+    except ValueError:
+        pass
+    ok("archive_keep.demo_period (off / 3 min), hold/ is never archived")
 
     key = "hold/2026/11/alert_test.jpg"
     db.save_photo_record("보류_테스트.jpg", key, "hold", [], 2_500_000)
@@ -215,6 +228,17 @@ def test_aws() -> None:
             assert new_key.startswith("keep/") and exists(new_key) and not exists(key)
             assert any(p["s3_key"] == new_key for p in db.get_photos("keep"))
             ok(f"move_photo hold -> keep ({new_key})")
+
+            import archive_keep
+            from datetime import timedelta
+            assert archive_keep.archive_old_keep(timedelta(minutes=10), prefix=new_key) == []  # too new
+            assert archive_keep.archive_old_keep(timedelta(0), prefix=new_key) == [new_key]
+            assert s3.head_object(Bucket=bucket, Key=new_key)["StorageClass"] == "GLACIER_IR"
+            assert archive_keep.archive_old_keep(timedelta(0), prefix=new_key) == []  # already done
+            with urllib.request.urlopen(aws_utils.get_photo_url(new_key, expires=300, mark_viewed=False),
+                                        timeout=10, context=ctx) as resp:
+                assert resp.read() == original  # Glacier IR opens instantly, no restore
+            ok("archive_old_keep -> GLACIER_IR (age check, no repeat, still opens instantly)")
 
             aws_utils.delete_photo(new_key)
             db.delete_photo_record(new_key)
