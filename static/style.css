@@ -312,3 +312,5 @@ a.saved-box:hover b { text-decoration: underline; text-underline-offset: 6px; }
 .vault-actions form:first-child button { border-radius: 5px 0 0 5px !important; margin-left: 0 !important; }
 .vault-actions form:last-child button { border-radius: 0 5px 5px 0 !important; }
 .vault-actions form:last-child button:hover { color: var(--p-red); }
+
+.flash-error { border-left-color: var(--p-red); color: var(--p-red); }

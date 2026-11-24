@@ -78,8 +78,10 @@
 {% block content %}
 <h1 class="page-title">보관할 사진 고르기</h1>
 <p class="page-sub">묶음마다 한 번에 정하고, 다르게 둘 사진만 아래에서 바꿔요.<br>AI가 잘못 묶었다면 사진 아래 그룹 이름을 눌러 옮길 수 있어요.</p>
-{% if storage_mode == 'local' %}
-<p class="flash">개발 모드: 아직 S3에 저장하지 않고 이 컴퓨터의 <code>tmp/_local_store</code>에 저장해요.</p>
+{% if storage_problem %}
+<p class="flash flash-error">{{ storage_problem }}</p>
+{% elif storage_mode == 'local' %}
+<p class="flash">로컬 저장 모드(USE_LOCAL_STORAGE=true): S3 대신 이 컴퓨터의 <code>tmp/_local_store</code>에 저장해요.</p>
 {% endif %}
 
 <nav class="group-chips" id="chips"></nav>

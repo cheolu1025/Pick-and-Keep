@@ -2,7 +2,7 @@
 {% block title %}저장 완료 · Pick & Keep{% endblock %}
 {% block content %}
 <h1 class="page-title">저장했어요</h1>
-{% if s.mode == 'local' %}<p class="page-sub">개발 모드: S3 대신 이 컴퓨터의 <code>tmp/_local_store</code>에 저장했어요.</p>{% endif %}
+{% if s.mode == 'local' %}<p class="page-sub">로컬 저장 모드: S3 대신 이 컴퓨터의 <code>tmp/_local_store</code>에 저장했어요.</p>{% endif %}
 
 <div class="saved-grid">
   <div class="saved-box g-keep"><b>{{ s.keep }}</b><span>평생 보관함</span></div>

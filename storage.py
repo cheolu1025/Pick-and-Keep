@@ -1,10 +1,13 @@
 """저장 연결부 (B 담당)
 
 화면에서 고른 사진을 실제로 저장하는 곳. A의 함수(aws_utils, db)를 여기서만 부른다.
-  - .env에 S3_BUCKET_NAME이 있으면 → S3 + DB (mode "aws")
-  - 비어 있거나 USE_LOCAL_STORAGE=true 이면 → tmp/_local_store/ 에 임시 저장 (mode "local")
-버킷이 없는 컴퓨터에서도 화면과 저장 흐름을 끝까지 테스트할 수 있게 하려는 것.
+  - 기본: S3 + DB (mode "aws")
+  - .env에 USE_LOCAL_STORAGE=true 라고 직접 켰을 때만 → tmp/_local_store/ 에 저장 (mode "local")
+    버킷이 없는 컴퓨터에서 화면만 테스트할 때 쓴다.
+서버에서 .env가 잘못돼 S3_BUCKET_NAME이 비면 로컬에 조용히 저장하지 않고,
+앱 시작 때 경고를 찍고 저장 화면에 오류를 보여준다 (A 요청).
 """
+import inspect
 import json
 import os
 import shutil
@@ -15,9 +18,23 @@ LOCAL_STORE = os.path.join(TMP_DIR, "_local_store")
 
 
 def mode() -> str:
-    if os.environ.get("USE_LOCAL_STORAGE", "false").lower() == "true":
+    if os.environ.get("USE_LOCAL_STORAGE", "false").strip().lower() == "true":
         return "local"
-    return "aws" if os.environ.get("S3_BUCKET_NAME", "").strip() else "local"
+    return "aws"
+
+
+def problem() -> str | None:
+    """저장할 수 없는 설정이면 사람이 읽을 안내 문장, 괜찮으면 None"""
+    if mode() == "aws" and not os.environ.get("S3_BUCKET_NAME", "").strip():
+        return (".env에 S3_BUCKET_NAME이 비어 있어서 사진을 저장할 수 없어요. "
+                "버킷 이름을 넣거나, 이 컴퓨터에서 화면만 테스트하려면 USE_LOCAL_STORAGE=true를 넣어 주세요.")
+    return None
+
+
+def _accepts_category() -> bool:
+    """A의 save_photo_record가 category 인자를 받는지 (A가 올리기 전/후 모두 동작하게)"""
+    import db
+    return "category" in inspect.signature(db.save_photo_record).parameters
 
 
 def save_photo(r: dict, folder: str) -> dict:
@@ -43,9 +60,11 @@ def _save_aws(r: dict, folder: str) -> dict:
     s3_key = aws_utils.upload_photo(r["path"], folder)
 
     # 3) DB에 기록. 실패하면 S3에 올린 것도 지워서 '주인 없는 파일'이 남지 않게
+    #    category: 화면에서 최종으로 고른 그룹 키 (사용자가 드롭다운으로 바꿨으면 바꾼 값)
+    extra = {"category": r.get("final_group")} if _accepts_category() else {}
     try:
         db.save_photo_record(r["original_name"], s3_key, folder,
-                             r.get("labels", []), r["size"], file_hash=r["hash"])
+                             r.get("labels", []), r["size"], file_hash=r["hash"], **extra)
     except sqlite3.IntegrityError:
         # 1)과 3) 사이에 같은 사진이 먼저 저장된 경우 (두 탭에서 동시에 저장 등)
         aws_utils.delete_photo(s3_key)
@@ -56,7 +75,7 @@ def _save_aws(r: dict, folder: str) -> dict:
     return {"status": "saved", "key": s3_key}
 
 
-# ---------- 임시 저장 (A 함수가 오기 전) ----------
+# ---------- 로컬 저장 (USE_LOCAL_STORAGE=true 일 때만) ----------
 def _load_index() -> list:
     path = os.path.join(LOCAL_STORE, "index.json")
     if not os.path.exists(path):
@@ -75,6 +94,7 @@ def _save_local(r: dict, folder: str) -> dict:
     shutil.copy(r["path"], os.path.join(LOCAL_STORE, key))
     index.append({"key": key, "folder": folder, "filename": r["original_name"],
                   "size": r["size"], "hash": r.get("hash"), "labels": r.get("labels", []),
+                  "category": r.get("final_group"),
                   "saved_at": datetime.now(timezone.utc).isoformat()})
     with open(os.path.join(LOCAL_STORE, "index.json"), "w", encoding="utf-8") as fp:
         json.dump(index, fp, ensure_ascii=False, indent=2)

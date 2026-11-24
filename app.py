@@ -33,6 +33,13 @@ app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 요청 하나당 최대 
 
 db.init_db()  # A: photos 테이블이 없으면 만든다 (여러 번 불러도 괜찮음)
 
+# 저장 설정 확인: 버킷이 비었는데 로컬 저장도 안 켰으면 시작할 때 경고 (A 요청)
+if storage.problem():
+    app.logger.warning("⚠ 저장 설정 오류: %s", storage.problem())
+    print("\n⚠ 저장 설정 오류:", storage.problem(), "\n", flush=True)
+elif storage.mode() == "local":
+    print("\nℹ USE_LOCAL_STORAGE=true: S3 대신 tmp/_local_store에 저장합니다 (테스트용)\n", flush=True)
+
 
 def _batch_path(batch_id: str) -> str:
     # batch_id는 우리가 만든 12자리 hex만 허용 (경로 조작 방지)
@@ -193,7 +200,7 @@ def classify_view(batch_id):
                            photo_count=photo_count, screenshots=screenshots,
                            reviews=reviews, group_info=classify.GROUP_INFO,
                            group_options=group_options, all_results=results,
-                           storage_mode=storage.mode())
+                           storage_mode=storage.mode(), storage_problem=storage.problem())
 
 
 VALID_DEST = {"keep", "hold", "skip"}
@@ -332,14 +339,6 @@ def stats_view():
     if (r := _need_vault()):
         return r
     return render_template("stats.html", s=vault.stats())
-
-
-@app.route("/local/<path:key>")
-def local_photo(key):
-    """개발 모드(S3 없이 저장)에서 tmp/_local_store 사진을 보여주는 경로"""
-    if storage.mode() != "local":
-        abort(404)
-    return send_from_directory(os.path.abspath(storage.LOCAL_STORE), key)
 
 
 if __name__ == "__main__":

@@ -17,8 +17,8 @@ FOLDER_NAME = {"keep": "평생 보관함", "hold": "보류함"}
 
 
 def available() -> bool:
-    """S3 버킷이 설정돼 있어야 보관함을 볼 수 있다 (개발 모드에서는 False)"""
-    return storage.mode() == "aws"
+    """S3 버킷이 설정돼 있어야 보관함을 볼 수 있다 (로컬 저장 모드나 설정 오류면 False)"""
+    return storage.mode() == "aws" and storage.problem() is None
 
 
 def _parse(iso: str | None) -> datetime | None:
