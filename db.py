@@ -21,6 +21,8 @@ DEFAULT_HOLD_DAYS = 60
 # status: kept for compatibility, always 'done'. SQS progress is tracked by B
 # in tmp/<batch_id>/<photo_id>.result.json, not in this DB (agreed 2026-11-22).
 # notified_at: when check_hold.py last emailed about this photo (NULL = never).
+# category: B's group key (e.g. 'dog', 'food', 'screenshot'), NULL if not given.
+#   Display names live in B's classify.GROUP_INFO, so only the key is stored.
 _TABLE = """
 CREATE TABLE IF NOT EXISTS photos (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,13 +36,14 @@ CREATE TABLE IF NOT EXISTS photos (
     status       TEXT NOT NULL DEFAULT 'done'
         CHECK (status IN ('pending', 'done', 'failed')),
     file_hash    TEXT,
-    notified_at  TEXT
+    notified_at  TEXT,
+    category     TEXT
 );
 """
 _INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_file_hash ON photos (file_hash);"
 
 # columns added after the first version; init_db() adds them to older DB files
-_ADDED_COLUMNS = {"file_hash": "TEXT", "notified_at": "TEXT"}
+_ADDED_COLUMNS = {"file_hash": "TEXT", "notified_at": "TEXT", "category": "TEXT"}
 
 
 # ---------- internal helpers ----------
@@ -136,22 +139,24 @@ def init_db() -> None:
 
 def save_photo_record(filename: str, s3_key: str, folder: str,
                       labels: list[dict], size: int,
-                      file_hash: str | None = None) -> int:
+                      file_hash: str | None = None,
+                      category: str | None = None) -> int:
     """Insert a photo record and return its id.
 
     file_hash is optional (SHA-256 of the original upload bytes). If the same
     hash already exists, sqlite3.IntegrityError is raised, so call
     is_duplicate() first.
+    category is optional: the final group key the user chose (e.g. 'food').
     """
     _check_folder(folder)
     now = _now()
     with _connect() as conn:
         cur = conn.execute(
             "INSERT INTO photos (filename, s3_key, folder, labels, size,"
-            " uploaded_at, last_viewed, file_hash)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " uploaded_at, last_viewed, file_hash, category)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (filename, s3_key, folder, json.dumps(labels, ensure_ascii=False),
-             size, now, now, file_hash),
+             size, now, now, file_hash, category),
         )
         return cur.lastrowid
 
@@ -176,6 +181,18 @@ def get_photo(photo_id: int) -> dict | None:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
     return _row_to_dict(row) if row else None
+
+
+def update_category(photo_id: int, category: str | None) -> bool:
+    """Change a saved photo's group (e.g. from the vault screen).
+
+    Uses the id, so it works the same after a hold -> keep move.
+    Returns False if there is no such photo. Does not count as viewing.
+    """
+    with _connect() as conn:
+        cur = conn.execute("UPDATE photos SET category = ? WHERE id = ?",
+                           (category, photo_id))
+        return cur.rowcount > 0
 
 
 def update_last_viewed(s3_key: str) -> None:

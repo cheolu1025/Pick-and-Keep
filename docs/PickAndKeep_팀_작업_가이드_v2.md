@@ -1,11 +1,11 @@
-# Pick & Keep 팀 작업 가이드 (v2.2, 11/22 업데이트)
+# Pick & Keep 팀 작업 가이드 (v2.3, 11/24 업데이트)
 
 > 박철우(A: 인프라·저장 담당), 유채민(B: AI·분류·화면 담당)이 각자 무엇을 하고, 무엇을 함께 맞춰야 하는지 정리한 문서입니다.
 > 저장소에 `docs/` 폴더를 만들어 이 파일을 넣어두고 같이 보면 좋습니다.
 
 ---
 
-## 0-1. 🆕 v2.1~v2.2 변경 사항 (11/22)
+## 0-1. 🆕 v2.1~v2.3 변경 사항 (11/22~11/24)
 
 | 구분 | 내용 | 영향 |
 |---|---|---|
@@ -18,6 +18,8 @@
 
 | 🆕 v2.2 시연 모드 | 보류 기간을 `.env`로 설정. `get_old_hold_photos()`를 인자 없이 부르면 설정을 따름, `hold_period_label()` 추가. 알림 메일은 사진당 한 번만 (`notified_at` 열) | B: 배너에서 인자 없이 호출, 문구에 `hold_period_label()` 사용 |
 | 🆕 v2.2 사진 번호로 찾기 | `get_photo(photo_id)` 추가. 크게 보기·보류함 버튼은 `s3_key` 대신 `id`를 주고받음 (이동해도 id는 그대로) | B: `/photo/<id>` 형태로 사용 |
+| 🆕 v2.3 그룹 저장 | `photos.category` 열 추가, `save_photo_record(..., category=None)` 선택 인자, `update_category(photo_id, category)` 추가. 값은 그룹 **key**(`"food"`, `"screenshot"` 등), 화면 이름은 B의 `classify.GROUP_INFO` | B: 저장 때 `category=r["final_group"]`, 보관함에서 그룹 변경 시 `update_category` |
+| 🆕 v2.3 라벨 형식 | `labels` 항목에 `area`(사진에서 물체가 차지하는 비율)도 포함 가능. JSON으로 그대로 저장되므로 A 쪽 변경 없음 | 없음 |
 
 > 변경 기록과 이유는 `docs/PickAndKeep_기능정리_발표노트.md` 2장(결정 기록)에도 남긴다.
 
@@ -167,9 +169,11 @@ def init_db() -> None:
 
 def save_photo_record(filename: str, s3_key: str, folder: str,
                       labels: list[dict], size: int,
-                      file_hash: str | None = None) -> int:
+                      file_hash: str | None = None,
+                      category: str | None = None) -> int:
     """사진 정보 저장 후 id 반환
     🆕 v2.1: file_hash(원본 SHA-256) 선택 인자. 같은 해시가 있으면 sqlite3.IntegrityError
+    🆕 v2.3: category(사용자가 고른 최종 그룹 key, 예: "food") 선택 인자. 안 넘기면 None
     filename=원본 이름, size=원본 크기"""
 
 def is_duplicate(file_hash: str) -> dict | None:
@@ -181,6 +185,10 @@ def get_photos(folder: str) -> list[dict]:
 def get_photo(photo_id: int) -> dict | None:
     """🆕 v2.2: 사진 하나를 id로 찾기, 없으면 None
     화면끼리는 s3_key 대신 id를 주고받음 (이동하면 s3_key는 바뀌지만 id는 그대로)"""
+
+def update_category(photo_id: int, category: str | None) -> bool:
+    """🆕 v2.3: 저장된 사진의 그룹 바꾸기 (보관함 화면용). 없는 id면 False
+    id로 찾으므로 평생 보관함으로 옮긴 사진도 그대로 동작. 열람 기록은 바뀌지 않음"""
 
 def update_last_viewed(s3_key: str) -> None:
     """열람 시각 갱신"""
@@ -200,7 +208,8 @@ def hold_period_label() -> str:
 # ===== B 담당: rekognition_utils.py =====
 def analyze_image(image_bytes: bytes, max_labels: int = 10,
                   min_confidence: float = 70) -> list[dict]:
-    """[{"name": "Food", "confidence": 97.2}, ...] 반환"""
+    """[{"name": "Food", "confidence": 97.2}, ...] 반환
+    🆕 v2.3: 항목에 "area"(물체가 차지하는 비율)가 추가될 수 있음. DB에는 JSON 그대로 저장"""
 
 # 🆕 B 담당 (B 내부에서만 사용, A 영향 없음)
 def detect_text(image_bytes: bytes) -> list[str]:
@@ -256,11 +265,13 @@ CREATE TABLE IF NOT EXISTS photos (
     status       TEXT NOT NULL DEFAULT 'done'  -- v2.1: 사용 안 함, 항상 done
         CHECK (status IN ('pending', 'done', 'failed')),
     file_hash    TEXT,                         -- 🆕 v2.1: 원본 SHA-256, 중복 방지 (NULL 허용)
-    notified_at  TEXT                          -- 🆕 v2.2: 보류함 알림 메일 보낸 시각 (A 내부용)
+    notified_at  TEXT,                         -- 🆕 v2.2: 보류함 알림 메일 보낸 시각 (A 내부용)
+    category     TEXT                          -- 🆕 v2.3: 그룹 key (예: 'food'), NULL 허용
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_file_hash ON photos (file_hash);
 ```
 - 시각은 전부 UTC ISO 8601 문자열 (예: `2026-11-22T09:00:00+00:00`)
+- 새로 추가된 열(`file_hash`, `notified_at`, `category`)은 `init_db()`가 기존 `photos.db`에 자동으로 붙임 → DB 파일을 지울 필요 없음
 
 **S3 키 규칙**
 ```
@@ -275,7 +286,7 @@ hold/2026/11/<UUID>_<영문파일명>.jpg
 | `/` | GET | 메인 화면, 보류함 안내 배너 | `get_old_hold_photos` |
 | `/upload` | POST | 사진 업로드, 변환 | - |
 | `/classify` | GET | 분류 결과 화면 (종류별 그룹) | - |
-| `/save` | POST | 선택한 사진을 keep/hold에 저장 | `upload_photo`, `save_photo_record` |
+| `/save` | POST | 선택한 사진을 keep/hold에 저장 | `is_duplicate`, `upload_photo`, `save_photo_record(..., category=)` |
 | `/keep` | GET | 평생 보관함 조회 | `get_photos`, `get_photo_url(key, mark_viewed=False)` |
 | `/hold` | GET | 보류함 조회 | `get_photos`, `get_photo_url(key, mark_viewed=False)` |
 | 🆕 `/photo/<id>` (이름은 B가 결정) | GET | 사진 크게 보기 = "열람" | `get_photo(id)` → `get_photo_url(key)` |
@@ -286,6 +297,8 @@ hold/2026/11/<UUID>_<영문파일명>.jpg
 - **임시 파일 위치**: `tmp/<batch_id>/` (`.gitignore`에 포함됨). 저장 후 삭제는 B가 담당
 - **분류 결과 전달**: 사진마다 `result.json` (원본 이름, 파일 경로, 원본 크기, 해시, 라벨, 그룹)
 - **S3 업로드 파일**: HEIC는 변환한 JPG(원래 해상도, Rekognition용 축소본 아님)를 `upload_photo`에 넘김. `save_photo_record`의 `size`는 원본 크기
+- 🆕 (11/24 B 확인) 일반 사진은 원본 그대로, HEIC만 원래 해상도 JPG로 변환해 업로드. 5MB 축소본은 Rekognition 호출 때 메모리에서만 사용. B 테스트 버킷: `pick-and-keep-chaemin-test`
+- 🆕 **그룹 저장 (v2.3)**: 분류 화면에서 바꾼 최종 그룹(`final_group`)을 `category`로 저장
 
 #### ⚠️ 추가로 합의할 것
 - 🆕 **gunicorn 타임아웃**: 동기 방식에서 사진을 많이 올리면 gunicorn 기본 타임아웃(30초)을 넘겨 502 에러가 날 수 있음. A가 배포 설정할 때 `--timeout 120` 정도로 늘려두기 (SQS가 켜지면 이 문제 자체가 줄어들지만, 스위치를 끈 경우를 대비해 유지)
@@ -496,7 +509,8 @@ git checkout -b feature/b-ui      # B
 - 시연 시나리오에 맞춰 화면 흐름 점검
 
 **🆕 ⑨ SQS 비동기 처리 (5주차, 필수 기능 완성 후)**
-- 업로드 → 사진마다 SQS에 메시지 → `worker.py`가 꺼내서 분류(⑧의 병렬 함수 재사용) → `update_classification`으로 저장 → 메시지 삭제
+- 업로드 → 사진마다 SQS에 메시지 → `worker.py`가 꺼내서 분류(⑧의 병렬 함수 재사용) → 🆕 결과를 `tmp/<batch_id>/<photo_id>.result.json`에 기록(임시 파일 → `os.replace`) → 메시지 삭제. DB 저장은 사용자가 저장 버튼을 누를 때 `/save`에서 (v2.1 결정, 4-2 SQS 절 참고)
+- 큐 URL은 `.env`의 `SQS_QUEUE_URL`에서만 읽음. 실제 서비스용 큐는 A 계정에 A가 생성
 - 처리 중 화면: `/status`를 2초 간격으로 확인해서 끝난 사진부터 표시
 - 사진이 적으면(예: 5장 이하) SQS 없이 바로 처리하는 방식도 고려
 - `USE_SQS=false`로 언제든 기존 방식으로 되돌릴 수 있게 구현

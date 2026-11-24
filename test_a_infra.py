@@ -40,14 +40,16 @@ def test_db() -> None:
     ok("init_db (table + WAL)")
 
     pid = db.save_photo_record("점심_피자.jpg", "hold/2026/11/aaa_test.jpg", "hold",
-                               LABELS, 1000, file_hash="hash-1")
+                               LABELS, 1000, file_hash="hash-1", category="food")
     db.save_photo_record("cat.png", "keep/2026/11/bbb_cat.png", "keep", [], 500)
     db.save_photo_record("dog.png", "keep/2026/11/ccc_dog.png", "keep", [], 300)  # no hash x2
     hold = db.get_photos("hold")
     assert len(hold) == 1 and hold[0]["filename"] == "점심_피자.jpg"
     assert hold[0]["labels"] == LABELS and hold[0]["status"] == "done"
+    assert hold[0]["category"] == "food"
     assert len(db.get_photos("keep")) == 2
-    ok("save_photo_record / get_photos (Korean filename, labels JSON, status=done)")
+    assert all(p["category"] is None for p in db.get_photos("keep"))  # not given -> None
+    ok("save_photo_record / get_photos (Korean filename, labels JSON, status=done, category)")
 
     assert db.get_saved_size() == 1800
     ok("get_saved_size")
@@ -77,6 +79,11 @@ def test_db() -> None:
     moved = db.get_photo(pid)  # same id after a move, new key and folder
     assert moved["s3_key"] == "keep/2026/11/aaa_test.jpg" and moved["folder"] == "keep"
     assert moved["filename"] == "점심_피자.jpg" and db.get_photo(99999) is None
+    viewed = moved["last_viewed"]
+    assert db.update_category(pid, "landscape") is True  # by id, works after the move
+    assert db.get_photo(pid)["category"] == "landscape"
+    assert db.get_photo(pid)["last_viewed"] == viewed  # changing group is not viewing
+    assert db.update_category(99999, "food") is False
     db.delete_photo_record("keep/2026/11/aaa_test.jpg")
     assert len(db.get_photos("keep")) == 2
     try:
@@ -84,7 +91,7 @@ def test_db() -> None:
         raise AssertionError("invalid folder accepted")
     except ValueError:
         pass
-    ok("update_photo_location / get_photo(id) after move / delete_photo_record / folder check")
+    ok("update_photo_location / get_photo(id) / update_category after move / delete / folder check")
 
 
 def _set_last_viewed(s3_key: str, last_viewed: str, notified_at: str | None = None) -> None:
@@ -149,7 +156,7 @@ def test_hold_alert() -> None:
         db.init_db()
         with db._connect() as c:
             cols = {r["name"] for r in c.execute("PRAGMA table_info(photos)")}
-        assert {"file_hash", "notified_at"} <= cols
+        assert {"file_hash", "notified_at", "category"} <= cols
     finally:
         os.environ["DB_PATH"] = TEST_DB
         for suffix in ("", "-wal", "-shm"):
