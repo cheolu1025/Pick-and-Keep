@@ -20,6 +20,7 @@
 | 🆕 v2.2 사진 번호로 찾기 | `get_photo(photo_id)` 추가. 크게 보기·보류함 버튼은 `s3_key` 대신 `id`를 주고받음 (이동해도 id는 그대로) | B: `/photo/<id>` 형태로 사용 |
 | 🆕 v2.3 그룹 저장 | `photos.category` 열 추가, `save_photo_record(..., category=None)` 선택 인자, `update_category(photo_id, category)` 추가. 값은 그룹 **key**(`"food"`, `"screenshot"` 등), 화면 이름은 B의 `classify.GROUP_INFO` | B: 저장 때 `category=r["final_group"]`, 보관함에서 그룹 변경 시 `update_category` |
 | 🆕 v2.3 라이프사이클 + 시연 모드 | `keep/` 90일 → Glacier IR 라이프사이클 규칙. 라이프사이클은 일 단위라 시연용으로 `KEEP_DEMO_MINUTES=3`이면 `archive_keep.py`(cron 1분)가 3분 지난 `keep/` 사진을 바로 Glacier IR로 전환. S3 key 그대로 | 없음 (B 코드 변경 없음, 전환된 사진도 `get_photo_url`로 바로 열림) |
+| 🆕 v2.3 웹 배포 | EC2에 nginx(80) → gunicorn(`--timeout 120`) → Flask, systemd 자동 실행. 사이트 입구에 비밀번호(팀 공용 계정, A가 따로 전달). 설정 파일은 `deploy/` | B: 서버에서는 `app.run()`(맨 아래 `if __name__`)이 실행되지 않음. 코드 반영은 A가 `git pull` + 재시작 |
 | 🆕 v2.3 라벨 형식 | `labels` 항목에 `area`(사진에서 물체가 차지하는 비율)도 포함 가능. JSON으로 그대로 저장되므로 A 쪽 변경 없음 | 없음 |
 
 > 변경 기록과 이유는 `docs/PickAndKeep_기능정리_발표노트.md` 2장(결정 기록)에도 남긴다.
@@ -316,6 +317,7 @@ SQS_QUEUE_URL=       # 🆕 A: 실제 큐 / B: 본인 테스트 큐
 HOLD_DAYS=60         # 🆕 v2.2: 보류 기간(일). 없으면 60
 HOLD_DEMO_MINUTES=   # 🆕 v2.2: 시연 모드. 값(예: 2)이 있으면 보류 기간이 그 분(分)으로 바뀜. 평소엔 비워 둠
 SITE_URL=            # 🆕 v2.2: 알림 메일 속 링크 (비우면 EC2가 자기 현재 주소를 자동으로 넣음)
+FLASK_SECRET_KEY=    # 🆕 v2.3: 서버는 무작위 값 (A가 setup_web.sh로 생성). 로컬은 비워도 됨
 KEEP_DEMO_MINUTES=   # 🆕 v2.3: 시연 모드. 값(예: 3)이 있으면 keep/ 사진이 그 분 뒤 Glacier IR로 전환. 평소엔 비워 둠 (A 서버만)
 ```
 - `.env`를 바꾸면 Flask를 재시작해야 반영됨 (서버에서는 A가 처리)
