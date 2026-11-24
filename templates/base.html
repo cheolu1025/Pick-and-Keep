@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Pick & Keep{% endblock %}</title>
+  <!-- 글꼴: 인터넷이 안 되면 기본 글꼴로 보임 (기능에는 영향 없음) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Nanum+Pen+Script&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}">Pick <span>&amp;</span> Keep</a>
+    {% if vault_on %}
+    <nav class="nav">
+      <a href="/keep" {% if request.path == '/keep' %}aria-current="page"{% endif %}>평생 보관함</a>
+      <a href="/hold" {% if request.path == '/hold' %}aria-current="page"{% endif %}>보류함</a>
+      <a href="/stats" {% if request.path == '/stats' %}aria-current="page"{% endif %}>확보 용량</a>
+    </nav>
+    {% else %}
+    <span class="muted">AI가 묶고, 내가 고르는 사진 백업</span>
+    {% endif %}
+  </header>
+  <main class="container">
+    {% block flashes %}
+    {% with messages = get_flashed_messages() %}
+      {% for m in messages %}<p class="flash">{{ m }}</p>{% endfor %}
+    {% endwith %}
+    {% endblock %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

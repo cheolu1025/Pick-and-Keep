@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ folder_name }} · Pick & Keep{% endblock %}
+{% block content %}
+<h1 class="page-title">{{ folder_name }}</h1>
+<p class="page-sub">
+  {% if folder == 'keep' %}오래 남기기로 한 사진이에요. 사진을 누르면 크게 볼 수 있어요.
+  {% else %}{{ period }} 동안 한 번도 열어 보지 않은 사진은 정리할지 다시 물어봐요.<br>사진을 눌러 크게 보면 기간이 처음부터 다시 시작돼요.{% endif %}
+</p>
+
+{% if folder == 'hold' and photos|selectattr('remain.old')|list and not only_old %}
+<p class="vault-filter"><a href="/hold?old=1">오래 안 본 사진만 보기</a></p>
+{% elif only_old %}
+<p class="vault-filter"><a href="/hold">보류함 전체 보기</a></p>
+{% endif %}
+
+{% if photos %}
+<section class="group">
+  <div class="group-head"><h2>{{ '오래 안 본 사진' if only_old else folder_name }}<span class="group-count">{{ photos|length }}장</span></h2></div>
+  <div class="grid">
+    {% for p in photos %}
+    <article class="card vault-card{% if p.remain and p.remain.old %} is-old{% endif %}">
+      <a href="/photo/{{ p.id }}" class="vault-thumb">
+        <img src="{{ p.url }}" alt="{{ p.filename }}" loading="lazy">
+      </a>
+      <p class="name" title="{{ p.filename }}">{{ p.filename }}</p>
+      <div class="info">
+        <span>{{ p.date }}</span>
+        {% if p.remain %}<span class="remain">{{ p.remain.text }}</span>{% endif %}
+      </div>
+      {% if folder == 'hold' %}
+      <div class="dest vault-actions">
+        <form method="post" action="/photo/{{ p.id }}/keep"><input type="hidden" name="back" value="{{ request.full_path }}"><button>평생으로</button></form>
+        <form method="post" action="/photo/{{ p.id }}/extend"><input type="hidden" name="back" value="{{ request.full_path }}"><button>연장</button></form>
+        <form method="post" action="/photo/{{ p.id }}/delete" onsubmit="return confirm('이 사진을 보관함에서 지울까요? 되돌릴 수 없어요.')"><button>삭제</button></form>
+      </div>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<div class="empty">
+  <p>{% if only_old %}오래 안 본 사진이 없어요.{% else %}아직 {{ folder_name }}에 사진이 없어요.{% endif %}</p>
+  <a class="btn" href="{{ url_for('index') }}">사진 올리기</a>
+</div>
+{% endif %}
+{% endblock %}
