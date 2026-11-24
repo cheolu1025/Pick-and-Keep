@@ -18,10 +18,10 @@
 | 확보 용량 계산 | ✅ 코드·테스트 완료 | `db.py` | |
 | 그룹(카테고리) 저장·변경 | ✅ 코드·테스트 완료 (11/24) | `db.py` | B 저장 코드에 `category=` 한 줄 필요 |
 | 보류 기간 지난 사진 찾기 (시연 모드 포함) | ✅ 코드·테스트 완료 | `db.py` | |
-| 자동 테스트 (DB 12 + S3 6 = 18단계) | ✅ 로컬 통과 (11/24, category·Glacier IR 포함) | `test_a_infra.py` | |
+| 자동 테스트 (DB 12 + S3 6 = 18단계) | ✅ 로컬·EC2 모두 통과 (11/24, category·Glacier IR 포함) | `test_a_infra.py` | |
 | EC2 서버 세팅 (코드 설치 + IAM 역할로 S3 테스트) | ✅ 완료 (11/22) | - | 웹 공개(gunicorn·nginx)는 아직 |
 | 보류함 알림 메일 (SNS + `check_hold.py` + cron) | ✅ 완료 (11/22, PR #3) — 실제 메일 수신, cron 1분 실행 확인 | `check_hold.py`, `deploy/crontab.txt` | |
-| 라이프사이클 (keep 90일 → Glacier IR) + 시연 모드 3분 | 🔶 코드·테스트 완료 (11/24), 버킷 규칙 등록 전 | `deploy/setup_lifecycle.py`, `archive_keep.py` | Learner Lab에서 Glacier IR 전환 가능 확인 |
+| 라이프사이클 (keep 90일 → Glacier IR) + 시연 모드 3분 | ✅ 완료 (11/24, PR #7) — 버킷 규칙 등록, EC2 cron 설치 | `deploy/setup_lifecycle.py`, `archive_keep.py` | Learner Lab에서 Glacier IR 전환 가능 확인 |
 | 자동 실행 (gunicorn + nginx + systemd) | ⬜ 예정 | `deploy/` | |
 | SQS 워커 서비스 등록 | ⬜ 예정 | `deploy/` | 워커 코드는 B |
 

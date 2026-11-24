@@ -232,9 +232,12 @@ def test_aws() -> None:
             import archive_keep
             from datetime import timedelta
             assert archive_keep.archive_old_keep(timedelta(minutes=10), prefix=new_key) == []  # too new
-            assert archive_keep.archive_old_keep(timedelta(0), prefix=new_key) == [new_key]
+            # S3 LastModified is rounded up to the next second, so a just-copied object can look
+            # ~1 s newer than this machine's clock (seen on EC2). Allow a few seconds of slack.
+            just_now = timedelta(seconds=-5)
+            assert archive_keep.archive_old_keep(just_now, prefix=new_key) == [new_key]
             assert s3.head_object(Bucket=bucket, Key=new_key)["StorageClass"] == "GLACIER_IR"
-            assert archive_keep.archive_old_keep(timedelta(0), prefix=new_key) == []  # already done
+            assert archive_keep.archive_old_keep(just_now, prefix=new_key) == []  # already done
             with urllib.request.urlopen(aws_utils.get_photo_url(new_key, expires=300, mark_viewed=False),
                                         timeout=10, context=ctx) as resp:
                 assert resp.read() == original  # Glacier IR opens instantly, no restore
