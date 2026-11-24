@@ -1,10 +1,14 @@
 # Pick & Keep cron jobs for the EC2 server (user: ubuntu)
 # Install (on EC2):  crontab ~/Pick-and-Keep/deploy/crontab.txt
 # Check:             crontab -l
-# Log:               tail ~/Pick-and-Keep/logs/check_hold.log
+# Log:               tail ~/Pick-and-Keep/logs/check_hold.log (archive_keep.log)
 #
 # check_hold.py runs every minute. Each photo is emailed only once, so this is
 # safe in normal mode (60 days) and makes demo mode (HOLD_DEMO_MINUTES) react
 # within about a minute. cron stops while the Learner Lab session is off.
 
 * * * * * cd /home/ubuntu/Pick-and-Keep && mkdir -p logs && venv/bin/python check_hold.py >> logs/check_hold.log 2>&1
+
+# archive_keep.py: demo mode for keep/ -> Glacier IR. Does nothing (no log line)
+# unless .env KEEP_DEMO_MINUTES is set; the real 90-day move is the S3 lifecycle rule.
+* * * * * cd /home/ubuntu/Pick-and-Keep && mkdir -p logs && venv/bin/python archive_keep.py >> logs/archive_keep.log 2>&1
