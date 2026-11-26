@@ -13,6 +13,7 @@ POST /upload 는 자바스크립트가 꺼져 있을 때를 위한 예비 경로
 """
 import json
 import os
+import time
 
 from dotenv import load_dotenv
 
@@ -51,12 +52,26 @@ def _batch_path(batch_id: str) -> str:
     return path
 
 
+AWS_KEY_ERRORS = ("ExpiredToken", "UnrecognizedClient", "InvalidClientTokenId",
+                  "NoCredentials", "Unable to locate credentials", "security token")
+
+
+def _friendly_error(e: Exception) -> tuple[str, str | None]:
+    """(사진 카드에 보일 짧은 문구, 오류 종류). 열쇠 문제면 kind="aws_key" """
+    msg = str(e)
+    if any(k in msg or k in type(e).__name__ for k in AWS_KEY_ERRORS):
+        return "AWS 연결이 만료돼서 분석하지 못했어요", "aws_key"
+    return "이 사진은 분석하지 못했어요", None
+
+
 def _process_one(file_storage, batch_path: str) -> dict:
     """사진 한 장: 저장 → HEIC 변환 → 스크린샷 판별/라벨 → 썸네일"""
     saved = image_utils.save_upload(file_storage, batch_path)
     try:
         path = image_utils.to_jpeg_if_heic(saved["path"])
+        started = time.perf_counter()
         result = classify.classify_photo(saved["original_name"], path)
+        result["seconds"] = round(time.perf_counter() - started, 2)   # 분석에 걸린 시간
         thumb = image_utils.make_thumbnail(path)
         result.update(
             photo_id=saved["photo_id"],
@@ -69,8 +84,10 @@ def _process_one(file_storage, batch_path: str) -> dict:
         )
     except Exception as e:  # 한 장 실패가 전체를 멈추지 않게
         app.logger.exception("분류 실패: %s", saved["original_name"])
+        short, kind = _friendly_error(e)
         result = {"photo_id": saved["photo_id"], "original_name": saved["original_name"],
-                  "error": str(e), "is_screenshot": False, "labels": [], "thumb": None}
+                  "error": short, "error_kind": kind, "error_detail": str(e),
+                  "is_screenshot": False, "labels": [], "thumb": None}
 
     # 한 장씩 결과를 파일로 남겨둔다 (finish에서 모음)
     with open(os.path.join(batch_path, f"{saved['photo_id']}.result.json"), "w",
@@ -196,7 +213,13 @@ def classify_view(batch_id):
     # 그룹 바꾸기 목록: 9개 그룹 + 스크린샷
     group_options = [(k, classify.GROUP_INFO[k]) for k in classify.GROUP_ORDER]
     group_options.append(("screenshot", {"name": "스크린샷", "emoji": "📱"}))
-    return render_template("classify.html", batch_id=batch_id, groups=groups,
+    # Rekognition 호출 수 (캐시 효과 확인용)
+    api = {"calls": sum(r.get("api_calls", 0) for r in results),
+           "hits": sum(r.get("cache_hits", 0) for r in results),
+           "seconds": round(sum(r.get("seconds", 0) for r in results), 1)}
+    aws_key_error = any(r.get("error_kind") == "aws_key" for r in results)
+    return render_template("classify.html", batch_id=batch_id, groups=groups, api=api,
+                           aws_key_error=aws_key_error,
                            photo_count=photo_count, screenshots=screenshots,
                            reviews=reviews, group_info=classify.GROUP_INFO,
                            group_options=group_options, all_results=results,
@@ -296,7 +319,8 @@ def vault_list():
     if only_old:
         photos = [p for p in photos if p["remain"]["old"]]
     return render_template("vault.html", folder=folder, folder_name=vault.FOLDER_NAME[folder],
-                           photos=photos, only_old=only_old, period=db.hold_period_label())
+                           photos=photos, groups=vault.group_photos(photos),
+                           only_old=only_old, period=db.hold_period_label())
 
 
 @app.route("/photo/<int:photo_id>")
@@ -308,14 +332,20 @@ def photo_view(photo_id):
     if p is None:
         abort(404)
     return render_template("photo.html", p=p, folder_name=vault.FOLDER_NAME[p["folder"]],
-                           period=db.hold_period_label())
+                           period=db.hold_period_label(), group_options=vault.group_options())
 
 
 @app.route("/photo/<int:photo_id>/<action>", methods=["POST"])
 def photo_action(photo_id, action):
-    """보류함 버튼: delete(삭제), extend(기간 연장), keep(평생 보관함으로)"""
+    """보류함 버튼: delete(삭제), extend(기간 연장), keep(평생 보관함으로) + group(그룹 바꾸기)"""
     if (r := _need_vault()):
         return r
+    if action == "group":
+        p = vault.change_group(photo_id, request.form.get("group", ""))
+        if p is None:
+            abort(400)
+        flash(f"{p['filename']}을(를) '{p['new_group']}' 그룹으로 옮겼어요.")
+        return redirect(f"/photo/{photo_id}")
     do = {"delete": vault.delete, "extend": vault.extend, "keep": vault.move_to_keep}.get(action)
     if do is None:
         abort(404)

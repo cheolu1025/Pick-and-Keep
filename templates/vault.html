@@ -14,10 +14,12 @@
 {% endif %}
 
 {% if photos %}
-<section class="group">
-  <div class="group-head"><h2>{{ '오래 안 본 사진' if only_old else folder_name }}<span class="group-count">{{ photos|length }}장</span></h2></div>
+<nav class="group-chips">{% for g in groups %}<a class="chip" href="#g-{{ g.key }}">{{ g.name }}<b>{{ g.photos|length }}</b></a>{% endfor %}</nav>
+{% for g in groups %}
+<section class="group" id="g-{{ g.key }}">
+  <div class="group-head"><h2>{{ g.name }}<span class="group-count">{{ g.photos|length }}장</span></h2></div>
   <div class="grid">
-    {% for p in photos %}
+    {% for p in g.photos %}
     <article class="card vault-card{% if p.remain and p.remain.old %} is-old{% endif %}">
       <a href="/photo/{{ p.id }}" class="vault-thumb">
         <img src="{{ p.url }}" alt="{{ p.filename }}" loading="lazy">
@@ -38,6 +40,7 @@
     {% endfor %}
   </div>
 </section>
+{% endfor %}
 {% else %}
 <div class="empty">
   <p>{% if only_old %}오래 안 본 사진이 없어요.{% else %}아직 {{ folder_name }}에 사진이 없어요.{% endif %}</p>

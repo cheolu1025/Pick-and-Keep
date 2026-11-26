@@ -226,6 +226,16 @@ def classify_photo(original_name: str, path: str) -> dict:
      "labels": [{"name": "Dog", "confidence": 98.1, "area": 0.4}, ...],
      "group": "dog", "group_label": "Dog", "text_lines": None}
     """
+    rekognition_utils.reset_counts()
+    try:
+        result = _classify(original_name, path)
+    finally:
+        result_counts = rekognition_utils.counts()
+    result["api_calls"], result["cache_hits"] = result_counts["calls"], result_counts["hits"]
+    return result
+
+
+def _classify(original_name: str, path: str) -> dict:
     info = image_utils.get_image_info(path)
     score, reasons = screenshot_score(original_name, info)
     result = {"score": score, "reasons": reasons, "labels": [], "text_lines": None,

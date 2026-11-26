@@ -9,11 +9,40 @@ A의 db.py, aws_utils.py를 여기서만 부른다. 지켜야 할 약속 (A 전�
 from datetime import datetime, timedelta, timezone
 
 import aws_utils
+import classify
 import db
 import storage
 
 KST = timezone(timedelta(hours=9))
 FOLDER_NAME = {"keep": "평생 보관함", "hold": "보류함"}
+
+# 그룹: 고르기 화면과 같은 순서 + 스크린샷. DB category는 영문 키 (A와 약속)
+GROUP_KEYS = classify.GROUP_ORDER + ["screenshot"]
+GROUP_NAME = {k: v["name"] for k, v in classify.GROUP_INFO.items()} | {"screenshot": "스크린샷"}
+
+
+def group_of(p: dict) -> str:
+    """사진의 그룹 키. category가 없는 예전 사진은 저장된 AI 라벨로 다시 계산한다
+    (화면에만 보여줄 뿐 DB는 바꾸지 않음. 라벨도 없으면 '기타')"""
+    if p.get("category") in GROUP_NAME:
+        return p["category"]
+    if p.get("labels"):
+        key, _ = classify.pick_group(p["labels"])
+        if key in GROUP_NAME:
+            return key
+    return "etc"
+
+
+def group_photos(photos: list[dict]) -> list[dict]:
+    """[{"key", "name", "photos"}] 그룹 순서대로, 빈 그룹은 뺌"""
+    by = {}
+    for p in photos:
+        by.setdefault(group_of(p), []).append(p)
+    return [{"key": k, "name": GROUP_NAME[k], "photos": by[k]} for k in GROUP_KEYS if k in by]
+
+
+def group_options() -> list[tuple[str, str]]:
+    return [(k, GROUP_NAME[k]) for k in GROUP_KEYS]
 
 
 def available() -> bool:
@@ -79,7 +108,19 @@ def open_photo(photo_id: int) -> dict | None:
     p["labels"] = sorted(p.get("labels") or [], key=lambda l: -l.get("confidence", 0))
     if p["folder"] == "hold":
         p["remain"] = _remaining(p)
+    p["group"] = group_of(p)
     return p
+
+
+def change_group(photo_id: int, key: str) -> dict | None:
+    """보관함에서 그룹 바꾸기 (열람으로 치지 않음)"""
+    if key not in GROUP_NAME:
+        return None
+    p = db.get_photo(photo_id)
+    if p and db.update_category(photo_id, key):
+        p["new_group"] = GROUP_NAME[key]
+        return p
+    return None
 
 
 # ---------- 보류함 버튼 3개 (+ 평생 보관함 삭제) ----------

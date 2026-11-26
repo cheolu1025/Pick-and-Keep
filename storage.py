@@ -7,7 +7,6 @@
 서버에서 .env가 잘못돼 S3_BUCKET_NAME이 비면 로컬에 조용히 저장하지 않고,
 앱 시작 때 경고를 찍고 저장 화면에 오류를 보여준다 (A 요청).
 """
-import inspect
 import json
 import os
 import shutil
@@ -29,12 +28,6 @@ def problem() -> str | None:
         return (".env에 S3_BUCKET_NAME이 비어 있어서 사진을 저장할 수 없어요. "
                 "버킷 이름을 넣거나, 이 컴퓨터에서 화면만 테스트하려면 USE_LOCAL_STORAGE=true를 넣어 주세요.")
     return None
-
-
-def _accepts_category() -> bool:
-    """A의 save_photo_record가 category 인자를 받는지 (A가 올리기 전/후 모두 동작하게)"""
-    import db
-    return "category" in inspect.signature(db.save_photo_record).parameters
 
 
 def save_photo(r: dict, folder: str) -> dict:
@@ -61,10 +54,10 @@ def _save_aws(r: dict, folder: str) -> dict:
 
     # 3) DB에 기록. 실패하면 S3에 올린 것도 지워서 '주인 없는 파일'이 남지 않게
     #    category: 화면에서 최종으로 고른 그룹 키 (사용자가 드롭다운으로 바꿨으면 바꾼 값)
-    extra = {"category": r.get("final_group")} if _accepts_category() else {}
     try:
         db.save_photo_record(r["original_name"], s3_key, folder,
-                             r.get("labels", []), r["size"], file_hash=r["hash"], **extra)
+                             r.get("labels", []), r["size"], file_hash=r["hash"],
+                             category=r.get("final_group"))
     except sqlite3.IntegrityError:
         # 1)과 3) 사이에 같은 사진이 먼저 저장된 경우 (두 탭에서 동시에 저장 등)
         aws_utils.delete_photo(s3_key)

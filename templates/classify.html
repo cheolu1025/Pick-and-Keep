@@ -16,7 +16,7 @@
   {% if p.thumb %}<img src="{{ url_for('tmp_image', batch_id=batch_id, filename=p.thumb) }}" alt="{{ p.original_name }}" loading="lazy">{% endif %}
   <p class="no"></p>
   <p class="name" title="{{ p.original_name }}">{{ p.original_name }}</p>
-  {% if p.error %}<p class="error">분류 실패: {{ p.error }}</p>{% endif %}
+  {% if p.error %}<p class="error" title="{{ p.error_detail or '' }}">{{ p.error }}</p>{% endif %}
 
   <div class="info">
     <!-- 그룹 바꾸기: 누르면 목록이 열림 -->
@@ -78,6 +78,9 @@
 {% block content %}
 <h1 class="page-title">보관할 사진 고르기</h1>
 <p class="page-sub">묶음마다 한 번에 정하고, 다르게 둘 사진만 아래에서 바꿔요.<br>AI가 잘못 묶었다면 사진 아래 그룹 이름을 눌러 옮길 수 있어요.</p>
+{% if aws_key_error %}
+<p class="flash flash-error">AWS 연결이 만료돼서 일부 사진을 분석하지 못했어요. Learner Lab을 켜고 자격 증명(credentials)을 새로 넣은 뒤, 사진을 다시 올려 주세요.</p>
+{% endif %}
 {% if storage_problem %}
 <p class="flash flash-error">{{ storage_problem }}</p>
 {% elif storage_mode == 'local' %}
@@ -118,8 +121,11 @@
 
 <details class="debug">
   <summary>판별 근거 보기 (개발용)</summary>
+  <p class="api-count">Rekognition 호출 {{ api.calls }}번 · 저장해 둔 결과 사용 {{ api.hits }}번
+    {% if api.calls + api.hits %}(호출 {{ '%.0f'|format(api.hits / (api.calls + api.hits) * 100) }}% 절약){% endif %}
+    · 분석 시간 합계 {{ api.seconds }}초</p>
   <table>
-    <tr><th>파일</th><th>결과</th><th>그룹</th><th>기준 라벨</th><th>방법</th><th>점수</th><th>글자 줄</th><th>근거</th></tr>
+    <tr><th>파일</th><th>결과</th><th>그룹</th><th>기준 라벨</th><th>방법</th><th>점수</th><th>글자 줄</th><th>호출/캐시</th><th>초</th><th>근거</th></tr>
     {% for p in all_results %}
     <tr>
       <td>{{ p.original_name }}</td>
@@ -129,6 +135,8 @@
       <td>{{ p.method }}</td>
       <td>{{ p.score }}</td>
       <td>{{ p.text_lines if p.text_lines is not none else '-' }}</td>
+      <td>{{ p.api_calls or 0 }} / {{ p.cache_hits or 0 }}</td>
+      <td>{{ p.seconds if p.seconds is not none else '-' }}</td>
       <td>{{ ((p.reasons or []) + (p.review_reasons or []))|join(', ') }}</td>
     </tr>
     {% endfor %}

@@ -9,6 +9,14 @@
   <h1>{{ p.filename }}</h1>
   <dl>
     <div><dt>보관 위치</dt><dd>{{ folder_name }}</dd></div>
+    <div><dt>그룹</dt><dd>
+      <form method="post" action="/photo/{{ p.id }}/group" class="group-form">
+        <select name="group" class="group-select" aria-label="그룹 바꾸기" onchange="this.form.submit()">
+          {% for key, name in group_options %}<option value="{{ key }}" {% if key == p.group %}selected{% endif %}>{{ name }}</option>{% endfor %}
+        </select>
+        <noscript><button>바꾸기</button></noscript>
+      </form>
+    </dd></div>
     <div><dt>저장한 날</dt><dd>{{ p.date }}</dd></div>
     <div><dt>크기</dt><dd>{{ '%.1f' | format((p.size or 0) / 1024 / 1024) }}MB</dd></div>
     {% if p.remain %}<div><dt>다음 확인까지</dt><dd>{{ p.remain.text }} <span class="muted">(방금 봐서 {{ period }}로 다시 시작)</span></dd></div>{% endif %}
